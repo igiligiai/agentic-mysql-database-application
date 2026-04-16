@@ -17,6 +17,7 @@ from api.tools.helpers import (
     _resolve_model,
     _safe_tool_content,
 )
+from api.utils.trimmer import trim_messages
 
 SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
 You help users query data, explore schema, trace table lineage, and understand their data.
@@ -98,6 +99,15 @@ class AgenticWorkflow:
                 prior_messages = prior_state.values.get("messages")
                 if isinstance(prior_messages, list):
                     existing_messages_count = len(prior_messages)
+
+                    # ── Trim context window before sending new message ──
+                    trimmed = trim_messages(prior_messages)
+                    if len(trimmed) < len(prior_messages):
+                        agent.update_state(
+                            config,
+                            {"messages": trimmed},
+                        )
+                        existing_messages_count = len(trimmed)
         except Exception:
             existing_messages_count = 0
 

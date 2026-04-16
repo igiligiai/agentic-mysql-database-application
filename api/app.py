@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from api.agent import AgenticWorkflow
 from api.utils.config import FRONT_DIR, get_port
 from api.utils.db import fetch_all
+from api.utils.trimmer import get_trim_settings, update_trim_settings
 
 app = FastAPI(title="AutoBase API", version="1.0.0")
 app.add_middleware(
@@ -37,6 +38,15 @@ class ToolRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: str = Field(default="default")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Any:
+    icon_path = FRONT_DIR / "favicon.ico"
+    if icon_path.is_file():
+        return FileResponse(icon_path)
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @app.get("/")
@@ -95,6 +105,24 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Chat workflow failed: {exc}") from exc
+
+
+class ContextConfigRequest(BaseModel):
+    max_messages: int | None = None
+    max_tool_result_chars: int | None = None
+    keep_last_n_pairs: int | None = None
+    trim_enabled: bool | None = None
+
+
+@app.get("/context-config")
+async def get_context_config() -> dict[str, Any]:
+    return get_trim_settings()
+
+
+@app.post("/context-config")
+async def set_context_config(payload: ContextConfigRequest) -> dict[str, Any]:
+    patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    return update_trim_settings(patch)
 
 
 if __name__ == "__main__":

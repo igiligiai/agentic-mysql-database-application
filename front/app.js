@@ -46,6 +46,7 @@ async function connectToBackend() {
     renderTableList();
     await loadSchema();
     await loadLineage();
+    await loadContextConfig();
     document.getElementById('setup-notice').style.display = 'none';
     setStatus(`Connected · ${state.tableList.length} objects`, 'ok');
   } catch (e) {
@@ -572,7 +573,7 @@ function renderLineageGraph(data, focusNode = null) {
   document.getElementById('lineage-legend').style.display = 'flex';
 }
 
-function lineageZoom(factor) {
+function lineageZoomBy(factor) {
   if (!lineageZoom) return;
   d3.select('#lineage-svg').transition().duration(300).call(lineageZoom.scaleBy, factor);
 }
@@ -693,6 +694,46 @@ The API starts on http://localhost:8000 and serves:
 
 Set OPENAI_API_KEY on the backend for server-side OpenAI initialization.
 The frontend does not send API keys.`);
+}
+
+// ═══════════════════════════════════════════════
+// CONTEXT WINDOW TUNING
+// ═══════════════════════════════════════════════
+async function loadContextConfig() {
+  try {
+    const res = await fetch(state.backendUrl + '/context-config');
+    if (!res.ok) return;
+    const cfg = await res.json();
+    if (cfg.max_messages != null) document.getElementById('ctx-max-messages').value = cfg.max_messages;
+    if (cfg.keep_last_n_pairs != null) document.getElementById('ctx-keep-pairs').value = cfg.keep_last_n_pairs;
+    if (cfg.max_tool_result_chars != null) document.getElementById('ctx-max-tool-chars').value = cfg.max_tool_result_chars;
+    if (cfg.trim_enabled != null) document.getElementById('ctx-trim-enabled').checked = cfg.trim_enabled;
+  } catch (_) { /* backend may not support it yet */ }
+}
+
+async function applyContextConfig() {
+  const statusEl = document.getElementById('ctx-status');
+  const payload = {
+    max_messages: parseInt(document.getElementById('ctx-max-messages').value, 10),
+    keep_last_n_pairs: parseInt(document.getElementById('ctx-keep-pairs').value, 10),
+    max_tool_result_chars: parseInt(document.getElementById('ctx-max-tool-chars').value, 10),
+    trim_enabled: document.getElementById('ctx-trim-enabled').checked,
+  };
+  try {
+    const res = await fetch(state.backendUrl + '/context-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const cfg = await res.json();
+    statusEl.style.color = 'var(--success)';
+    statusEl.textContent = `Applied · ${cfg.max_messages} msgs / ${cfg.keep_last_n_pairs} turns`;
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+  } catch (e) {
+    statusEl.style.color = 'var(--error)';
+    statusEl.textContent = 'Failed: ' + e.message;
+  }
 }
 
 // ═══════════════════════════════════════════════
