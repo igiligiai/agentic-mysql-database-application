@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import json
-import os
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
+from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
 from api.tools import dispatch_tool
+from api.tools.helpers import (
+    _build_langgraph_tools,
+    _get_langgraph_agent,
+    _load_tools,
+    _message_to_text,
+    _resolve_api_key,
+    _safe_tool_content,
+)
 
 SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
 You help users query data, explore schema, trace table lineage, and understand their data.
@@ -34,20 +41,12 @@ Current database: Car data warehouse (bronze/silver/gold layers)"""
 TOOLS_FILE_PATH = Path(__file__).resolve().parent / "utils" / "tools.json"
 
 
-def _load_tools() -> list[dict[str, Any]]:
-    with TOOLS_FILE_PATH.open("r", encoding="utf-8") as tools_file:
-        loaded = json.load(tools_file)
-    if not isinstance(loaded, list):
-        raise ValueError("tools.json must contain a JSON array")
-    return loaded
-
-
-TOOLS = _load_tools()
-
-
-@dataclass
-class AgentSession:
-    messages: list[dict[str, Any]] = field(default_factory=list)
+TOOL_SCHEMAS = _load_tools(TOOLS_FILE_PATH)
+TOOL_SCHEMA_BY_NAME = {
+    item["function"]["name"]: item["function"]
+    for item in TOOL_SCHEMAS
+    if isinstance(item, dict) and isinstance(item.get("function"), dict)
+}
 
 
 @dataclass
@@ -56,7 +55,12 @@ class AgenticWorkflow:
 
     max_steps: int = 8
     history: list[dict[str, Any]] = field(default_factory=list)
-    sessions: dict[str, AgentSession] = field(default_factory=dict)
+    _checkpointer: InMemorySaver = field(default_factory=InMemorySaver, init=False, repr=False)
+    _agent_cache: dict[tuple[str, str], Any] = field(default_factory=dict, init=False, repr=False)
+    _langgraph_tools: list[Any] = field(default_factory=list, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._langgraph_tools = _build_langgraph_tools(self.run_tool, TOOL_SCHEMA_BY_NAME)
 
     def run_tool(self, tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = args or {}
@@ -64,92 +68,83 @@ class AgenticWorkflow:
         self.history.append({"tool": tool, "args": payload, "result": result})
         return result
 
-    def _resolve_api_key(self, override_key: str | None = None) -> str:
-        api_key = (override_key or "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
-        if not api_key:
-            raise ValueError(
-                "OpenAI API key is required. Set OPENAI_API_KEY or pass openai_api_key in request."
-            )
-        return api_key
-
-    def _get_session(self, session_id: str) -> AgentSession:
-        if session_id not in self.sessions:
-            self.sessions[session_id] = AgentSession()
-        return self.sessions[session_id]
-
     def run_chat(
         self,
         user_message: str,
         session_id: str = "default",
-        openai_api_key: str | None = None,
         model: str = "gpt-4o",
     ) -> dict[str, Any]:
-        api_key = self._resolve_api_key(openai_api_key)
-        session = self._get_session(session_id)
-        client = OpenAI(api_key=api_key)
+        api_key = _resolve_api_key()
+        agent = _get_langgraph_agent(
+            agent_cache=self._agent_cache,
+            checkpointer=self._checkpointer,
+            langgraph_tools=self._langgraph_tools,
+            api_key=api_key,
+            model=model,
+            system_prompt=SYSTEM_PROMPT,
+        )
+        config = {
+            "configurable": {
+                "thread_id": session_id,
+            },
+            "recursion_limit": self.max_steps * 2,
+        }
 
-        session.messages.append({"role": "user", "content": user_message})
-        tool_trace: list[dict[str, Any]] = []
+        existing_messages_count = 0
+        try:
+            prior_state = agent.get_state(config)
+            if prior_state and isinstance(prior_state.values, dict):
+                prior_messages = prior_state.values.get("messages")
+                if isinstance(prior_messages, list):
+                    existing_messages_count = len(prior_messages)
+        except Exception:
+            existing_messages_count = 0
 
-        for _ in range(self.max_steps):
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, *session.messages],
-                tools=TOOLS,
-                tool_choice="auto",
-                max_tokens=2000,
-            )
+        result = agent.invoke(
+            {"messages": [{"role": "user", "content": user_message}]},
+            config=config,
+        )
 
-            message = completion.choices[0].message
-            assistant_entry: dict[str, Any] = {
-                "role": "assistant",
-                "content": message.content or "",
-            }
+        all_messages = result.get("messages", [])
+        if not isinstance(all_messages, list):
+            all_messages = []
+        new_messages = all_messages[existing_messages_count:]
 
-            if message.tool_calls:
-                assistant_entry["tool_calls"] = [
-                    {
-                        "id": tool_call.id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.function.name,
-                            "arguments": tool_call.function.arguments,
-                        },
-                    }
-                    for tool_call in message.tool_calls
-                ]
+        tool_trace_map: dict[str, dict[str, Any]] = {}
+        reply_text = ""
 
-            session.messages.append(assistant_entry)
+        for message in new_messages:
+            if isinstance(message, AIMessage):
+                if message.tool_calls:
+                    for call in message.tool_calls:
+                        call_id = str(call.get("id") or "")
+                        if not call_id:
+                            continue
+                        tool_trace_map[call_id] = {
+                            "name": str(call.get("name") or ""),
+                            "args": call.get("args") or {},
+                            "result": None,
+                        }
+                else:
+                    text = _message_to_text(message.content)
+                    if text.strip():
+                        reply_text = text
 
-            if not message.tool_calls:
-                return {
-                    "reply": message.content or "",
-                    "tool_calls": tool_trace,
-                    "session_id": session_id,
-                }
+            if isinstance(message, ToolMessage):
+                tool_call_id = str(getattr(message, "tool_call_id", "") or "")
+                if tool_call_id and tool_call_id in tool_trace_map:
+                    tool_trace_map[tool_call_id]["result"] = _safe_tool_content(message.content)
 
-            for tool_call in message.tool_calls:
-                arguments = json.loads(tool_call.function.arguments or "{}")
-                result = self.run_tool(tool_call.function.name, arguments)
-
-                tool_trace.append(
-                    {
-                        "name": tool_call.function.name,
-                        "args": arguments,
-                        "result": result,
-                    }
-                )
-
-                session.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(result),
-                    }
-                )
+        if not reply_text:
+            for message in reversed(all_messages):
+                if isinstance(message, AIMessage):
+                    text = _message_to_text(message.content)
+                    if text.strip():
+                        reply_text = text
+                        break
 
         return {
-            "reply": "Agent reached maximum steps. Please try a more specific question.",
-            "tool_calls": tool_trace,
+            "reply": reply_text or "Agent finished without a text response.",
+            "tool_calls": list(tool_trace_map.values()),
             "session_id": session_id,
         }

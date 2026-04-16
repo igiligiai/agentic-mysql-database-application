@@ -24,6 +24,7 @@ Python-first agentic MySQL application with two main folders:
 	- describe_table
 	- check_data_quality
 - POST /chat for Python-side OpenAI chat + tool-calling orchestration
+- LangGraph-based workflow for stateful agent execution and tool routing
 - SELECT-only SQL execution guard for execute_sql
 - D3 lineage graph, schema explorer, and chat UI
 
@@ -42,10 +43,16 @@ Set these in your shell or environment file:
 - DB_NAME (default: cars_db)
 - DB_PORT (default: 3306)
 - PORT (default: 8000)
-- OPENAI_API_KEY (required unless passed from frontend as optional override)
+- OPENAI_API_KEY (required)
 
 OpenAI tool-calling initialization happens in Python backend (`api/agent.py`).
-Frontend key input is optional and acts as per-session override for `/chat`.
+Frontend does not send API keys.
+
+## Agent Workflow
+
+- The backend uses LangGraph + LangChain OpenAI to orchestrate tool calls.
+- Thread state is persisted per `session_id` via LangGraph checkpointer (`thread_id`).
+- No direct use of `client.chat.completions` in the application workflow.
 
 ## Run
 

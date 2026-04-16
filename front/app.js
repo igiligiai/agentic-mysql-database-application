@@ -3,7 +3,6 @@
 // ═══════════════════════════════════════════════
 const state = {
   connected: false,
-  openaiKey: '',
   backendUrl: 'http://localhost:8000',
   sessionId: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `session-${Date.now()}`,
   schema: [],
@@ -33,10 +32,8 @@ async function callBackend(endpoint, body = {}) {
 }
 
 async function connectToBackend() {
-  const key = document.getElementById('openai-key').value.trim();
   const url = document.getElementById('backend-url').value.trim();
 
-  state.openaiKey = key;
   state.backendUrl = url;
   setStatus('Connecting...', 'warn');
 
@@ -198,10 +195,6 @@ async function runAgent(userMessage) {
     session_id: state.sessionId,
     model: 'gpt-4o',
   };
-
-  if (state.openaiKey) {
-    payload.openai_api_key = state.openaiKey;
-  }
 
   return callBackend('/chat', payload);
 }
@@ -700,7 +693,7 @@ The API starts on http://localhost:8000 and serves:
 - POST /chat
 
 Set OPENAI_API_KEY on the backend for server-side OpenAI initialization.
-The sidebar key is optional and can be used to override per session.`);
+The frontend does not send API keys.`);
 }
 
 // ═══════════════════════════════════════════════

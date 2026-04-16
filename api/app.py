@@ -37,7 +37,6 @@ class ToolRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: str = Field(default="default")
-    openai_api_key: str | None = None
     model: str = Field(default="gpt-4o")
 
 
@@ -88,7 +87,6 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
         return agent.run_chat(
             user_message=payload.message,
             session_id=payload.session_id,
-            openai_api_key=payload.openai_api_key,
             model=payload.model,
         )
     except ValueError as exc:
