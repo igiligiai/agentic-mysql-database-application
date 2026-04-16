@@ -74,6 +74,13 @@ def _resolve_api_key() -> str:
     return api_key
 
 
+def _resolve_model() -> str:
+    model = os.getenv("OPENAI_MODEL", "").strip()
+    if not model:
+        raise ValueError("OpenAI model is required. Set OPENAI_MODEL in backend env.")
+    return model
+
+
 def _tool_description(
     tool_schema_by_name: dict[str, dict[str, Any]], tool_name: str, fallback: str
 ) -> str:

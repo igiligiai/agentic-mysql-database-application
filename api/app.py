@@ -37,7 +37,6 @@ class ToolRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: str = Field(default="default")
-    model: str = Field(default="gpt-4o")
 
 
 @app.get("/")
@@ -87,7 +86,6 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
         return agent.run_chat(
             user_message=payload.message,
             session_id=payload.session_id,
-            model=payload.model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

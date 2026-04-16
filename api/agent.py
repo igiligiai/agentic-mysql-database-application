@@ -14,6 +14,7 @@ from api.tools.helpers import (
     _load_tools,
     _message_to_text,
     _resolve_api_key,
+    _resolve_model,
     _safe_tool_content,
 )
 
@@ -72,9 +73,9 @@ class AgenticWorkflow:
         self,
         user_message: str,
         session_id: str = "default",
-        model: str = "gpt-4o",
     ) -> dict[str, Any]:
         api_key = _resolve_api_key()
+        model = _resolve_model()
         agent = _get_langgraph_agent(
             agent_cache=self._agent_cache,
             checkpointer=self._checkpointer,

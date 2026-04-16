@@ -44,9 +44,11 @@ Set these in your shell or environment file:
 - DB_PORT (default: 3306)
 - PORT (default: 8000)
 - OPENAI_API_KEY (required)
+- OPENAI_MODEL (required)
 
 OpenAI tool-calling initialization happens in Python backend (`api/agent.py`).
 Frontend does not send API keys.
+Frontend does not send model selection.
 
 ## Agent Workflow
 

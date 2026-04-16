@@ -193,7 +193,6 @@ async function runAgent(userMessage) {
   const payload = {
     message: userMessage,
     session_id: state.sessionId,
-    model: 'gpt-4o',
   };
 
   return callBackend('/chat', payload);
