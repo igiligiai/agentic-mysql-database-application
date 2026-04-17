@@ -1,54 +1,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from api.tools import dispatch_tool
 from api.tools.helpers import (
-    _build_langgraph_tools,
     _get_langgraph_agent,
-    _load_tools,
     _message_to_text,
     _resolve_api_key,
     _resolve_model,
     _safe_tool_content,
+    build_tools,
 )
 from api.utils.trimmer import trim_messages
 
-SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
-You help users query data, explore schema, trace table lineage, and understand their data.
+SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL database.
+You help users query data and explore the schema.
 
 Your capabilities:
 - Translate natural language to SQL and execute queries
-- Describe tables, views, and their relationships
-- Generate lineage graphs showing data flow (bronze -> silver -> gold pattern)
-- Run data quality checks
-- Detect schema changes and anomalies
+- Retrieve the full database schema
 
 Guidelines:
 - Always use tools to fetch real data; never fabricate results
 - When writing SQL, prefer clean, readable queries
-- For lineage questions, use get_table_lineage
-- For schema questions, use get_schema or describe_table
+- For schema questions, use get_schema first
 - Format results clearly. Reference column names in backticks
 - If a query might be slow, warn the user first
-- Be concise but thorough
-
-Current database: Car data warehouse (bronze/silver/gold layers)"""
-
-TOOLS_FILE_PATH = Path(__file__).resolve().parent / "utils" / "tools.json"
-
-
-TOOL_SCHEMAS = _load_tools(TOOLS_FILE_PATH)
-TOOL_SCHEMA_BY_NAME = {
-    item["function"]["name"]: item["function"]
-    for item in TOOL_SCHEMAS
-    if isinstance(item, dict) and isinstance(item.get("function"), dict)
-}
+- Be concise but thorough"""
 
 
 @dataclass
@@ -56,19 +37,12 @@ class AgenticWorkflow:
     """Core orchestration layer for tool-based agent actions."""
 
     max_steps: int = 8
-    history: list[dict[str, Any]] = field(default_factory=list)
     _checkpointer: InMemorySaver = field(default_factory=InMemorySaver, init=False, repr=False)
     _agent_cache: dict[tuple[str, str], Any] = field(default_factory=dict, init=False, repr=False)
     _langgraph_tools: list[Any] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._langgraph_tools = _build_langgraph_tools(self.run_tool, TOOL_SCHEMA_BY_NAME)
-
-    def run_tool(self, tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = args or {}
-        result = dispatch_tool(tool, payload)
-        self.history.append({"tool": tool, "args": payload, "result": result})
-        return result
+        self._langgraph_tools = build_tools()
 
     def run_chat(
         self,

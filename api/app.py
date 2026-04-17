@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from mysql.connector import Error
 from pydantic import BaseModel, Field
 
 from api.agent import AgenticWorkflow
-from api.utils.config import FRONT_DIR, get_port
+from api.utils.config import get_port
 from api.utils.db import fetch_all
 from api.utils.trimmer import get_trim_settings, update_trim_settings
 
@@ -24,37 +21,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if os.path.isdir(FRONT_DIR):
-    app.mount("/front", StaticFiles(directory=FRONT_DIR), name="front")
-
 agent = AgenticWorkflow()
-
-
-class ToolRequest(BaseModel):
-    tool: str
-    args: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str = Field(default="default")
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon() -> Any:
-    icon_path = FRONT_DIR / "favicon.ico"
-    if icon_path.is_file():
-        return FileResponse(icon_path)
-    from fastapi.responses import Response
-    return Response(status_code=204)
-
-
-@app.get("/")
-async def serve_frontend() -> Any:
-    index_path = FRONT_DIR / "index.html"
-    if index_path.is_file():
-        return FileResponse(index_path)
-    return {"ok": True, "message": "AutoBase API is running."}
 
 
 @app.post("/ping")
@@ -72,17 +44,6 @@ async def ping() -> dict[str, Any]:
             """
         )
         return {"ok": True, "tables": tables}
-    except Error as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.post("/tool")
-async def tool_dispatch(payload: ToolRequest) -> dict[str, Any]:
-    try:
-        return agent.run_tool(payload.tool, payload.args)
-
-    except HTTPException:
-        raise
     except Error as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
