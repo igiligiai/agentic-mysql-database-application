@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoBase · Data Intelligence Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<link rel="stylesheet" href="/front/styles.css">
+</head>
+<body>
+
+<div class="shell">
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="logo">Auto<span>Base</span></div>
+    <div class="badge">DATA INTELLIGENCE AGENT</div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <span class="conn-label" id="conn-label">Not connected</span>
+      <div class="conn-dot" id="conn-dot"></div>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <h3>Connection</h3>
+      <div class="field"><label>Backend URL</label><input type="text" id="backend-url" value="http://localhost:8000" placeholder="http://localhost:8000"></div>
+      <button class="btn" id="connect-btn" onclick="connectToBackend()">Connect</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Tables & Views</h3>
+      <div id="table-list">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-align:center;padding:12px 0;">Connect to load schema</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section" style="margin-top:auto;border-top:1px solid var(--border);border-bottom:none;">
+      <h3>Context Window</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="field">
+          <label>Max Messages</label>
+          <input type="number" id="ctx-max-messages" value="40" min="4" max="200" style="width:100%">
+        </div>
+        <div class="field">
+          <label>Keep Last N Turns</label>
+          <input type="number" id="ctx-keep-pairs" value="10" min="1" max="100" style="width:100%">
+        </div>
+        <div class="field">
+          <label>Max Tool Result Chars</label>
+          <input type="number" id="ctx-max-tool-chars" value="4000" min="500" max="50000" step="500" style="width:100%">
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="ctx-trim-enabled" checked style="width:auto;accent-color:var(--accent);">
+          <label for="ctx-trim-enabled" style="margin:0;cursor:pointer;">Trimming enabled</label>
+        </div>
+        <button class="btn btn-ghost" onclick="applyContextConfig()">Apply</button>
+        <div id="ctx-status" style="font-size:10px;font-family:var(--mono);color:var(--text3);text-align:center;min-height:14px;"></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section" style="border-top:1px solid var(--border);border-bottom:none;">
+      <h3>Quick Actions</h3>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button class="btn btn-ghost" onclick="quickAction('schema')">→ Describe all tables</button>
+        <button class="btn btn-ghost" onclick="quickAction('lineage')">→ Show full lineage</button>
+        <button class="btn btn-ghost" onclick="quickAction('quality')">→ Data quality check</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="notice" id="setup-notice">
+      ⚡ <strong>Setup required:</strong> This agent needs the Python backend running locally to connect to MySQL and handle OpenAI tool-calling.
+      See the <strong>README</strong> section below for setup. Add backend URL and connect.
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('chat')">Query Agent</div>
+      <div class="tab" onclick="switchTab('schema')">Schema Explorer</div>
+      <div class="tab" onclick="switchTab('lineage')">Lineage Graph</div>
+    </div>
+
+    <!-- Chat Panel -->
+    <div class="panel active" id="panel-chat">
+      <div class="chat-history" id="chat-history">
+        <div class="empty">
+          <div class="empty-icon">⬡</div>
+          <div class="empty-text">Ask anything about your car data</div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <div class="suggestions" id="suggestions">
+          <span class="suggestion" onclick="useSuggestion(this.textContent)">How many vehicles are in my database?</span>
+          <span class="suggestion" onclick="useSuggestion(this.textContent)">Top 5 most driven cars in AD mode</span>
+          <span class="suggestion" onclick="useSuggestion(this.textContent)">Average duration of trips</span>
+          <span class="suggestion" onclick="useSuggestion(this.textContent)">Show drive locations</span>
+          <span class="suggestion" onclick="useSuggestion(this.textContent)">Which tables reference vehicles?</span>
+        </div>
+        <div class="chat-input-row">
+          <textarea class="chat-textarea" id="chat-input" placeholder="Ask a question about your car database..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schema Panel -->
+    <div class="panel" id="panel-schema">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">
+        <input type="text" id="schema-search" placeholder="Search tables, columns..." style="background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;padding:7px 12px;border-radius:6px;outline:none;flex:1;" oninput="filterSchema(this.value)">
+        <button class="btn" style="width:auto;padding:7px 14px;" onclick="loadSchema()">Refresh</button>
+      </div>
+      <div class="schema-panel-inner" id="schema-content">
+        <div class="empty"><div class="empty-icon">⬡</div><div class="empty-text">Connect to explore schema</div></div>
+      </div>
+    </div>
+
+    <!-- Lineage Panel -->
+    <div class="panel" id="panel-lineage">
+      <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">
+        <select id="lineage-focus" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;padding:7px 12px;border-radius:6px;outline:none;" onchange="renderLineage(this.value)">
+          <option value="all">All tables</option>
+        </select>
+        <span style="font-size:11px;font-family:var(--mono);color:var(--text3);">Drag to pan · Scroll to zoom · Click node for details</span>
+        <button class="btn btn-ghost" style="width:auto;padding:7px 14px;margin-left:auto;" onclick="renderLineage('all')">Reset view</button>
+      </div>
+      <div class="lineage-panel-inner">
+        <svg id="lineage-svg"></svg>
+        <div class="lineage-controls">
+          <div class="lineage-btn" onclick="lineageZoomBy(1.3)" title="Zoom in">+</div>
+          <div class="lineage-btn" onclick="lineageZoomBy(0.77)" title="Zoom out">−</div>
+        </div>
+        <div class="lineage-legend" id="lineage-legend" style="display:none;">
+          <div style="font-size:9px;letter-spacing:.1em;color:var(--text3);margin-bottom:4px;font-weight:600;">LEGEND</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#e8ff59;"></div>Base table</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#59ffe8;"></div>View</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#ff6b35;"></div>Selected focus</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-bar" id="status-bar">
+      <div class="status-item"><span>Ready</span></div>
+    </div>
+  </main>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script src="/front/app.js" defer></script>
+
+</body>
+</html>
