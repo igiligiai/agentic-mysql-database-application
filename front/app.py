@@ -33,31 +33,25 @@ with st.sidebar:
             r.raise_for_status()
             return r.json()
         except Exception:
-            return {"max_messages": 40, "keep_last_n_pairs": 10, "max_tool_result_chars": 4000, "trim_enabled": True}
+            return {"max_messages": 40, "max_response_tokens": 1024}
 
     ctx = _load_ctx()
 
+    max_response_tokens = st.slider(
+        "Max response tokens", min_value=64, max_value=8192, step=64,
+        value=int(ctx.get("max_response_tokens", 1024)),
+    )
     max_messages = st.slider(
         "Max messages", min_value=4, max_value=200, value=int(ctx.get("max_messages", 40))
     )
-    keep_last_n = st.slider(
-        "Keep last N turns", min_value=1, max_value=100, value=int(ctx.get("keep_last_n_pairs", 10))
-    )
-    max_tool_chars = st.slider(
-        "Max tool result chars", min_value=500, max_value=50_000, step=500,
-        value=int(ctx.get("max_tool_result_chars", 4000)),
-    )
-    trim_enabled = st.checkbox("Trim enabled", value=bool(ctx.get("trim_enabled", True)))
 
     if st.button("Apply", use_container_width=True):
         try:
             r = requests.post(
                 f"{BACKEND_URL}/context-config",
                 json={
+                    "max_response_tokens": max_response_tokens,
                     "max_messages": max_messages,
-                    "keep_last_n_pairs": keep_last_n,
-                    "max_tool_result_chars": max_tool_chars,
-                    "trim_enabled": trim_enabled,
                 },
                 timeout=5,
             )

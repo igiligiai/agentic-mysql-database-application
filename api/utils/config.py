@@ -21,10 +21,7 @@ def get_port(default: int = 8000) -> int:
 
 # ── Context window / message trimming defaults ──────────────────
 # All tuneable at runtime via the /context-config endpoint.
-CONTEXT_DEFAULTS: dict[str, int | bool] = {
+CONTEXT_DEFAULTS: dict[str, int] = {
     "max_messages": int(os.getenv("CTX_MAX_MESSAGES", "40")),
-    "max_tool_result_chars": int(os.getenv("CTX_MAX_TOOL_RESULT_CHARS", "4000")),
-    "keep_system": True,
-    "keep_last_n_pairs": int(os.getenv("CTX_KEEP_LAST_N_PAIRS", "10")),
-    "trim_enabled": os.getenv("CTX_TRIM_ENABLED", "true").lower() == "true",
+    "max_response_tokens": int(os.getenv("CTX_MAX_RESPONSE_TOKENS", "1024")),
 }

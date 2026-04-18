@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, RemoveMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from api.tools.helpers import (
@@ -14,7 +14,7 @@ from api.tools.helpers import (
     _safe_tool_content,
     build_tools,
 )
-from api.utils.trimmer import trim_messages
+from api.utils.trimmer import get_trim_settings, trim_messages
 
 SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL database.
 You help users query data and explore the schema.
@@ -51,6 +51,7 @@ class AgenticWorkflow:
     ) -> dict[str, Any]:
         api_key = _resolve_api_key()
         model = _resolve_model()
+        max_tokens = int(get_trim_settings().get("max_response_tokens", 1024))
         agent = _get_langgraph_agent(
             agent_cache=self._agent_cache,
             checkpointer=self._checkpointer,
@@ -58,6 +59,7 @@ class AgenticWorkflow:
             api_key=api_key,
             model=model,
             system_prompt=SYSTEM_PROMPT,
+            max_tokens=max_tokens,
         )
         config = {
             "configurable": {
@@ -69,21 +71,26 @@ class AgenticWorkflow:
         existing_messages_count = 0
         try:
             prior_state = agent.get_state(config)
-            if prior_state and isinstance(prior_state.values, dict):
-                prior_messages = prior_state.values.get("messages")
-                if isinstance(prior_messages, list):
-                    existing_messages_count = len(prior_messages)
-
-                    # ── Trim context window before sending new message ──
-                    trimmed = trim_messages(prior_messages)
-                    if len(trimmed) < len(prior_messages):
-                        agent.update_state(
-                            config,
-                            {"messages": trimmed},
-                        )
-                        existing_messages_count = len(trimmed)
+            prior_messages = (
+                prior_state.values.get("messages", [])
+                if prior_state and isinstance(prior_state.values, dict)
+                else []
+            )
         except Exception:
-            existing_messages_count = 0
+            prior_messages = []
+
+        existing_messages_count = len(prior_messages)
+        if prior_messages:
+            trimmed = trim_messages(prior_messages)
+            if len(trimmed) < len(prior_messages):
+                trimmed_ids = {m.id for m in trimmed}
+                removals = [
+                    RemoveMessage(id=m.id)
+                    for m in prior_messages
+                    if m.id not in trimmed_ids
+                ]
+                agent.update_state(config, {"messages": trimmed + removals})
+                existing_messages_count = len(trimmed)
 
         result = agent.invoke(
             {"messages": [{"role": "user", "content": user_message}]},

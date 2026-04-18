@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import traceback
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -11,6 +13,9 @@ from api.agent import AgenticWorkflow
 from api.utils.config import get_port
 from api.utils.db import fetch_all
 from api.utils.trimmer import get_trim_settings, update_trim_settings
+
+log = logging.getLogger("autobase")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 
 app = FastAPI(title="AutoBase API", version="1.0.0")
 app.add_middleware(
@@ -59,20 +64,21 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
             session_id=payload.session_id,
         )
     except ValueError as exc:
+        log.error("chat 400: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Error as exc:
+        log.error("chat db error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
+        log.error("chat 500:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Chat workflow failed: {exc}") from exc
 
 
 class ContextConfigRequest(BaseModel):
     max_messages: int | None = None
-    max_tool_result_chars: int | None = None
-    keep_last_n_pairs: int | None = None
-    trim_enabled: bool | None = None
+    max_response_tokens: int | None = None
 
 
 @app.get("/context-config")

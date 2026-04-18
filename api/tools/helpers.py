@@ -6,7 +6,6 @@ import re
 import time
 from typing import Any
 
-from fastapi import HTTPException
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -59,7 +58,7 @@ def build_tools() -> list[Any]:
         """Run a SELECT query on the MySQL database."""
         query = query.strip()
         if not re.match(r"^SELECT\s", query, flags=re.IGNORECASE):
-            raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
+            return json.dumps({"error": "Only SELECT queries are permitted."})
         start = time.perf_counter()
         columns, rows = fetch_matrix(query)
         duration_ms = int((time.perf_counter() - start) * 1000)
@@ -129,19 +128,20 @@ def build_tools() -> list[Any]:
 
 
 def _get_langgraph_agent(
-    agent_cache: dict[tuple[str, str], Any],
+    agent_cache: dict[tuple[str, str, int], Any],
     checkpointer: Any,
     langgraph_tools: list[Any],
     api_key: str,
     model: str,
     system_prompt: str,
+    max_tokens: int,
 ) -> Any:
-    cache_key = (api_key, model)
+    cache_key = (api_key, model, max_tokens)
     cached = agent_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    llm = ChatOpenAI(model=model, api_key=api_key, temperature=0)
+    llm = ChatOpenAI(model=model, api_key=api_key, temperature=0, max_tokens=max_tokens)
     agent = create_react_agent(
         model=llm,
         tools=langgraph_tools,
