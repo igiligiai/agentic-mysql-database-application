@@ -53,7 +53,15 @@ def _resolve_model() -> str:
 
 
 def build_tools() -> list[Any]:
-    @tool(description="Execute a SQL SELECT query against the MySQL database and return results.")
+    # Define and return the list of tools available to the agent. 
+    # These are the functions that the agent can call to interact with the environment, 
+    # fetch data, or perform actions. Each tool should be decorated with @tool and include 
+    # a description of its purpose and expected inputs/outputs.
+    
+    @tool(description="""
+          Execute a SQL SELECT query against the MySQL database and return results.
+          Only SELECT queries are allowed for safety. The input should be a valid SQL query string.
+          """)
     def execute_sql(query: str, explanation: str) -> str:
         """Run a SELECT query on the MySQL database."""
         query = query.strip()
@@ -70,7 +78,11 @@ def build_tools() -> list[Any]:
             "duration_ms": duration_ms,
         })
 
-    @tool(description="Get the full database schema including all tables and columns.")
+    @tool(description="""
+          Get the full database schema including all tables and columns.
+          This should only be called once per session to help the agent understand the database structure.
+          No input is required. The output will include table names, column names, data types, and key information.
+          """)
     def get_schema() -> str:
         """Return full database schema."""
         cols = fetch_all(
@@ -136,11 +148,20 @@ def _get_langgraph_agent(
     system_prompt: str,
     max_tokens: int,
 ) -> Any:
+    # Use a cache to reuse agent instances with the same configuration. 
+    # This avoids the overhead of creating a new agent for every request, which can be expensive. 
+    # The cache key is based on the API key, model, and max tokens, since these are the main factors 
+    # that influence the agent's behavior and resource usage. If an agent with the same configuration 
+    # exists in the cache, it is returned. Otherwise, a new agent is created, stored in the cache, and returned.
     cache_key = (api_key, model, max_tokens)
     cached = agent_cache.get(cache_key)
     if cached is not None:
         return cached
 
+    # Create a new agent instance with the specified configuration. The agent is initialized with the
+    # language model, tools, checkpointer, and system prompt. 
+    # The max_tokens parameter is passed to the language model to control the maximum length of responses. 
+    # After creation, the agent is stored in the cache before being returned.
     llm = ChatOpenAI(model=model, api_key=api_key, temperature=0, max_tokens=max_tokens)
     agent = create_react_agent(
         model=llm,
@@ -150,4 +171,3 @@ def _get_langgraph_agent(
     )
     agent_cache[cache_key] = agent
     return agent
-

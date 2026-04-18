@@ -36,6 +36,7 @@ Guidelines:
 class AgenticWorkflow:
     """Core orchestration layer for tool-based agent actions."""
 
+    # initial configuration for agent runs, can be extended in the future with more parameters as needed
     max_steps: int = 8
     _checkpointer: InMemorySaver = field(default_factory=InMemorySaver, init=False, repr=False)
     _agent_cache: dict[tuple[str, str], Any] = field(default_factory=dict, init=False, repr=False)
@@ -49,6 +50,9 @@ class AgenticWorkflow:
         user_message: str,
         session_id: str = "default",
     ) -> dict[str, Any]:
+        
+        # For simplicity, this implementation does not currently support multiple
+        # concurrent sessions or persistent storage of conversation history.
         api_key = _resolve_api_key()
         model = _resolve_model()
         max_tokens = int(get_trim_settings().get("max_response_tokens", 1024))
@@ -70,6 +74,8 @@ class AgenticWorkflow:
 
         existing_messages_count = 0
         try:
+            # Attempt to fetch prior messages for this session to enable trimming.
+            # If any part of this fails, we proceed without trimming.
             prior_state = agent.get_state(config)
             prior_messages = (
                 prior_state.values.get("messages", [])
@@ -77,6 +83,7 @@ class AgenticWorkflow:
                 else []
             )
         except Exception:
+            # If fetching prior messages fails, proceed without trimming.
             prior_messages = []
 
         existing_messages_count = len(prior_messages)

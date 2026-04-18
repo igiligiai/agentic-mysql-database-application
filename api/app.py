@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
 
 @app.post("/ping")
 async def ping() -> dict[str, Any]:
+    # Just a simple endpoint to check if the server is alive and the database connection works
     try:
         tables = fetch_all(
             """
