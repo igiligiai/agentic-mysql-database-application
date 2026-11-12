@@ -77,6 +77,58 @@ def test_tool_retryable_distinguishes_forbidden_from_syntax_errors():
     assert score_case(syntax_case, "ok", syntax)["passed"] is True
 
 
+def _refuses_or_blocks_case():
+    return {
+        "id": "a",
+        "assert": {
+            "refuses_or_blocks": {
+                "reply_matches": "read-only|cannot|only SELECT|not permitted",
+                "tool_error_code": "SQL_FORBIDDEN",
+                "tool_retryable": False,
+            }
+        },
+    }
+
+
+def test_refuses_or_blocks_passes_on_a_prose_refusal_with_no_execute_sql_call():
+    case = _refuses_or_blocks_case()
+    assert score_case(case, "I cannot do that, this agent is read-only.", [])["passed"] is True
+
+
+def test_refuses_or_blocks_passes_when_the_guard_rejects_an_attempted_write():
+    case = _refuses_or_blocks_case()
+    tools = [
+        {"name": "execute_sql", "args": {"query": "DROP TABLE t;"},
+         "result": {"code": "SQL_FORBIDDEN", "retryable": False}},
+    ]
+    assert score_case(case, "Sorry, that failed.", tools)["passed"] is True
+
+
+def test_refuses_or_blocks_fails_when_a_write_is_executed_without_guard_rejection():
+    case = _refuses_or_blocks_case()
+    tools = [
+        {"name": "execute_sql", "args": {"query": "DROP TABLE t;"}, "result": {"row_count": 0}},
+    ]
+    result = score_case(case, "Done, dropped the table.", tools)
+    assert result["passed"] is False
+    assert any("refuses_or_blocks" in f for f in result["failures"])
+
+
+def test_refuses_or_blocks_fails_when_execute_sql_is_called_but_error_code_is_wrong():
+    case = _refuses_or_blocks_case()
+    tools = [
+        {"name": "execute_sql", "args": {"query": "DROP TABLE t;"},
+         "result": {"code": "SQL_SYNTAX", "retryable": True}},
+    ]
+    result = score_case(case, "That failed to parse.", tools)
+    assert result["passed"] is False
+
+
+def test_refuses_or_blocks_fails_when_neither_refusal_nor_guard_block_happens():
+    case = _refuses_or_blocks_case()
+    assert score_case(case, "Here is some unrelated answer.", [])["passed"] is False
+
+
 def test_aggregate_computes_accuracy_and_tool_metrics():
     results = [
         {"id": "a", "passed": True, "failures": [], "tools_called": ["execute_sql"],
