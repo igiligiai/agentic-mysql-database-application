@@ -2,46 +2,50 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
+from mysql.connector import Error as MySQLError
 
-from api.tools.helpers import infer_layer, validate_identifier
+from api.tools.helpers import InvalidIdentifierError, infer_layer, validate_identifier
 from api.tools.sql_tools import execute_sql_tool, explain_query_tool
 from api.utils.db import fetch_all, fetch_one
-from api.utils.errors import tool_error
+from api.utils.errors import from_mysql_error, tool_error
 
 
 def get_schema_tool() -> dict[str, Any]:
-    cols = fetch_all(
-        """
-        SELECT
-          c.TABLE_NAME,
-          c.COLUMN_NAME,
-          c.DATA_TYPE,
-          c.COLUMN_TYPE,
-          c.IS_NULLABLE,
-          c.COLUMN_KEY,
-          c.COLUMN_DEFAULT,
-          c.EXTRA,
-          t.TABLE_TYPE
-        FROM information_schema.COLUMNS c
-        JOIN information_schema.TABLES t
-          ON c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
-        WHERE c.TABLE_SCHEMA = DATABASE()
-        ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
-        """
-    )
+    try:
+        cols = fetch_all(
+            """
+            SELECT
+              c.TABLE_NAME,
+              c.COLUMN_NAME,
+              c.DATA_TYPE,
+              c.COLUMN_TYPE,
+              c.IS_NULLABLE,
+              c.COLUMN_KEY,
+              c.COLUMN_DEFAULT,
+              c.EXTRA,
+              t.TABLE_TYPE
+            FROM information_schema.COLUMNS c
+            JOIN information_schema.TABLES t
+              ON c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
+            WHERE c.TABLE_SCHEMA = DATABASE()
+            ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
+            """
+        )
 
-    fks = fetch_all(
-        """
-        SELECT
-          TABLE_NAME,
-          COLUMN_NAME,
-          REFERENCED_TABLE_NAME,
-          REFERENCED_COLUMN_NAME
-        FROM information_schema.KEY_COLUMN_USAGE
-        WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
-        """
-    )
+        fks = fetch_all(
+            """
+            SELECT
+              TABLE_NAME,
+              COLUMN_NAME,
+              REFERENCED_TABLE_NAME,
+              REFERENCED_COLUMN_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
+            """
+        )
+    except MySQLError as exc:
+        return from_mysql_error(exc)
+
     fk_set = {f"{fk['TABLE_NAME']}.{fk['COLUMN_NAME']}" for fk in fks}
 
     tables: dict[str, dict[str, Any]] = {}
@@ -79,28 +83,31 @@ def get_schema_tool() -> dict[str, Any]:
 def get_table_lineage_tool(args: dict[str, Any]) -> dict[str, Any]:
     table_name = str(args.get("table_name") or "all")
 
-    tables = fetch_all(
-        """
-        SELECT TABLE_NAME AS name, TABLE_TYPE AS type
-        FROM information_schema.TABLES
-        WHERE TABLE_SCHEMA = DATABASE()
-        """
-    )
-    views = fetch_all(
-        """
-        SELECT TABLE_NAME, VIEW_DEFINITION
-        FROM information_schema.VIEWS
-        WHERE TABLE_SCHEMA = DATABASE()
-        """
-    )
-    fks = fetch_all(
-        """
-        SELECT TABLE_NAME, REFERENCED_TABLE_NAME
-        FROM information_schema.KEY_COLUMN_USAGE
-        WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
-        GROUP BY TABLE_NAME, REFERENCED_TABLE_NAME
-        """
-    )
+    try:
+        tables = fetch_all(
+            """
+            SELECT TABLE_NAME AS name, TABLE_TYPE AS type
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            """
+        )
+        views = fetch_all(
+            """
+            SELECT TABLE_NAME, VIEW_DEFINITION
+            FROM information_schema.VIEWS
+            WHERE TABLE_SCHEMA = DATABASE()
+            """
+        )
+        fks = fetch_all(
+            """
+            SELECT TABLE_NAME, REFERENCED_TABLE_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
+            GROUP BY TABLE_NAME, REFERENCED_TABLE_NAME
+            """
+        )
+    except MySQLError as exc:
+        return from_mysql_error(exc)
 
     nodes = [
         {
@@ -156,19 +163,24 @@ def get_table_lineage_tool(args: dict[str, Any]) -> dict[str, Any]:
 def describe_table_tool(args: dict[str, Any]) -> dict[str, Any]:
     table_name = str(args.get("table_name") or "").strip()
     if not table_name:
-        raise HTTPException(status_code=400, detail="table_name is required")
+        return tool_error("TOOL_BAD_ARGS", detail="The 'table_name' argument is required.")
 
-    safe_table = validate_identifier(table_name, "table name")
-    count_row = fetch_one(f"SELECT COUNT(*) AS cnt FROM {safe_table}") or {"cnt": 0}
-    sample_rows = fetch_all(f"SELECT * FROM {safe_table} LIMIT 3")
-    table_info = fetch_one(
-        """
-        SELECT UPDATE_TIME
-        FROM information_schema.TABLES
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
-        """,
-        (table_name,),
-    )
+    try:
+        safe_table = validate_identifier(table_name, "table name")
+        count_row = fetch_one(f"SELECT COUNT(*) AS cnt FROM {safe_table}") or {"cnt": 0}
+        sample_rows = fetch_all(f"SELECT * FROM {safe_table} LIMIT 3")
+        table_info = fetch_one(
+            """
+            SELECT UPDATE_TIME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+            """,
+            (table_name,),
+        )
+    except InvalidIdentifierError as exc:
+        return tool_error("TOOL_BAD_ARGS", detail=str(exc))
+    except MySQLError as exc:
+        return from_mysql_error(exc)
 
     return {
         "table_name": table_name,
@@ -182,65 +194,70 @@ def describe_table_tool(args: dict[str, Any]) -> dict[str, Any]:
 def check_data_quality_tool(args: dict[str, Any]) -> dict[str, Any]:
     table_name = str(args.get("table_name") or "").strip()
     if not table_name:
-        raise HTTPException(status_code=400, detail="table_name is required")
+        return tool_error("TOOL_BAD_ARGS", detail="The 'table_name' argument is required.")
 
-    safe_table = validate_identifier(table_name, "table name")
-    cols = fetch_all(
-        """
-        SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
-        """,
-        (table_name,),
-    )
-    total_row = fetch_one(f"SELECT COUNT(*) AS cnt FROM {safe_table}") or {"cnt": 0}
-    total = int(total_row.get("cnt", 0) or 0)
+    try:
+        safe_table = validate_identifier(table_name, "table name")
+        cols = fetch_all(
+            """
+            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+            """,
+            (table_name,),
+        )
+        total_row = fetch_one(f"SELECT COUNT(*) AS cnt FROM {safe_table}") or {"cnt": 0}
+        total = int(total_row.get("cnt", 0) or 0)
 
-    checks: list[dict[str, Any]] = []
-    for col in cols:
-        if col["IS_NULLABLE"] != "YES":
-            continue
+        checks: list[dict[str, Any]] = []
+        for col in cols:
+            if col["IS_NULLABLE"] != "YES":
+                continue
 
-        col_name = col["COLUMN_NAME"]
-        safe_col = validate_identifier(col_name, "column name")
-        null_row = fetch_one(
-            f"SELECT COUNT(*) AS nulls FROM {safe_table} WHERE {safe_col} IS NULL"
-        ) or {"nulls": 0}
-        nulls = int(null_row.get("nulls", 0) or 0)
+            col_name = col["COLUMN_NAME"]
+            safe_col = validate_identifier(col_name, "column name")
+            null_row = fetch_one(
+                f"SELECT COUNT(*) AS nulls FROM {safe_table} WHERE {safe_col} IS NULL"
+            ) or {"nulls": 0}
+            nulls = int(null_row.get("nulls", 0) or 0)
 
-        if nulls > 0:
-            pct = (nulls * 100.0 / total) if total else 0
+            if nulls > 0:
+                pct = (nulls * 100.0 / total) if total else 0
+                checks.append(
+                    {
+                        "name": f"Nulls: {col_name}",
+                        "status": "warn" if pct > 10 else "ok",
+                        "detail": f"{nulls} null rows ({pct:.1f}%)",
+                    }
+                )
+
+        pk_col = fetch_one(
+            """
+            SELECT COLUMN_NAME
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_KEY = 'PRI'
+            LIMIT 1
+            """,
+            (table_name,),
+        )
+        if pk_col:
+            pk_name = pk_col["COLUMN_NAME"]
+            safe_pk = validate_identifier(pk_name, "primary key")
+            dup_row = fetch_one(
+                f"SELECT COUNT(*) - COUNT(DISTINCT {safe_pk}) AS dups FROM {safe_table}"
+            ) or {"dups": 0}
+            dups = int(dup_row.get("dups", 0) or 0)
             checks.append(
                 {
-                    "name": f"Nulls: {col_name}",
-                    "status": "warn" if pct > 10 else "ok",
-                    "detail": f"{nulls} null rows ({pct:.1f}%)",
+                    "name": "Duplicate primary keys",
+                    "status": "error" if dups > 0 else "ok",
+                    "detail": f"{dups} duplicate keys found!" if dups > 0 else "No duplicates",
                 }
             )
-
-    pk_col = fetch_one(
-        """
-        SELECT COLUMN_NAME
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_KEY = 'PRI'
-        LIMIT 1
-        """,
-        (table_name,),
-    )
-    if pk_col:
-        pk_name = pk_col["COLUMN_NAME"]
-        safe_pk = validate_identifier(pk_name, "primary key")
-        dup_row = fetch_one(
-            f"SELECT COUNT(*) - COUNT(DISTINCT {safe_pk}) AS dups FROM {safe_table}"
-        ) or {"dups": 0}
-        dups = int(dup_row.get("dups", 0) or 0)
-        checks.append(
-            {
-                "name": "Duplicate primary keys",
-                "status": "error" if dups > 0 else "ok",
-                "detail": f"{dups} duplicate keys found!" if dups > 0 else "No duplicates",
-            }
-        )
+    except InvalidIdentifierError as exc:
+        return tool_error("TOOL_BAD_ARGS", detail=str(exc))
+    except MySQLError as exc:
+        return from_mysql_error(exc)
 
     checks.append(
         {

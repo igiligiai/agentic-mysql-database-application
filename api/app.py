@@ -14,7 +14,7 @@ from api.agent import AgenticWorkflow
 from api.utils.config import FRONT_DIR, get_port
 from api.utils.db import fetch_all
 from api.utils import telemetry
-from api.utils.errors import is_tool_error
+from api.utils.errors import from_mysql_error, is_tool_error
 from api.utils.trimmer import get_trim_settings, update_trim_settings
 
 app = FastAPI(title="AutoBase API", version="1.0.0")
@@ -75,7 +75,7 @@ async def ping() -> dict[str, Any]:
         )
         return {"ok": True, "tables": tables}
     except Error as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=from_mysql_error(exc)["error"]) from exc
 
 
 @app.post("/tool")
@@ -85,7 +85,7 @@ async def tool_dispatch(payload: ToolRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Error as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=from_mysql_error(exc)["error"]) from exc
 
     # Handlers return ToolError dicts so the agent can repair itself. The
     # non-LLM frontend callers (Schema Explorer, Lineage Graph) expect HTTP
@@ -112,9 +112,14 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Error as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=from_mysql_error(exc)["error"]) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Chat workflow failed: {exc}") from exc
+        # Never forward str(exc) here: an uncaught exception may carry driver
+        # text, a traceback fragment, or anything else from deep inside the
+        # agent loop. Only the redacted ToolError contract may reach a client.
+        raise HTTPException(
+            status_code=500, detail="Chat workflow failed unexpectedly."
+        ) from exc
 
 
 @app.get("/metrics")

@@ -7,12 +7,20 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class InvalidIdentifierError(Exception):
+    """Raised by validate_identifier for a malformed table/column name.
+
+    A dedicated exception (not HTTPException) so handlers can convert it into
+    a ToolError the agent can act on, instead of it propagating as an HTTP
+    error that kills the whole chat turn.
+    """
 
 
 def infer_layer(table_name: str) -> str:
@@ -30,7 +38,7 @@ def infer_layer(table_name: str) -> str:
 
 def validate_identifier(name: str, label: str = "identifier") -> str:
     if not name or not _IDENTIFIER_RE.fullmatch(name):
-        raise HTTPException(status_code=400, detail=f"Invalid {label}: {name!r}")
+        raise InvalidIdentifierError(f"Invalid {label}: {name!r}")
     return f"`{name}`"
 
 
