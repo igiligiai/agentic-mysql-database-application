@@ -10,3 +10,4 @@ __pycache__/
 *.lock
 docs/superpowers/
 .superpowers/
+tests/eval/last_run.json

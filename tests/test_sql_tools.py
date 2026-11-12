@@ -20,10 +20,6 @@ def test_dispatch_routes_execute_sql_to_sql_tools(monkeypatch):
     assert result["row_count"] == 1
 
 
-def test_dispatch_rejects_an_unknown_tool():
-    assert "error" in dispatch_tool("no_such_tool", {})
-
-
 def test_dispatch_unknown_tool_returns_a_structured_tool_error():
     result = dispatch_tool("no_such_tool", {})
     assert is_tool_error(result)
@@ -63,7 +59,7 @@ def test_driver_failure_becomes_a_retryable_tool_error(monkeypatch):
 
 def test_missing_query_argument_is_a_bad_args_error():
     result = sql_tools.execute_sql_tool({})
-    assert result["code"] in {"TOOL_BAD_ARGS", "SQL_SYNTAX"}
+    assert result["code"] == "TOOL_BAD_ARGS"
 
 
 import json

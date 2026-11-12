@@ -3,7 +3,6 @@ from __future__ import annotations
 import api.semantics.loader as loader
 from api.semantics.loader import (
     MAX_RENDER_BYTES,
-    SEMANTICS_DIR,
     get_semantic_prompt_block,
     introspect_schema,
     render_schema_inventory,
@@ -12,10 +11,6 @@ from api.semantics.loader import (
 
 def _obj(name: str, type_: str = "BASE TABLE") -> dict[str, str]:
     return {"name": name, "type": "VIEW" if type_ == "VIEW" else "TABLE", "layer": "silver"}
-
-
-def test_semantics_dir_is_inside_the_api_package():
-    assert SEMANTICS_DIR.name == "semantics"
 
 
 def test_render_inventory_lists_objects_grouped_by_kind_and_layer():
@@ -67,10 +62,6 @@ def test_render_inventory_truncates_deterministically_when_over_budget():
     # Same input, same budget -> identical output (stable ordering/truncation point).
     again = render_schema_inventory(objects, max_bytes=512)
     assert rendered == again
-
-
-def test_prompt_budget_is_4096_bytes():
-    assert MAX_RENDER_BYTES == 4096
 
 
 def test_a_huge_live_inventory_still_fits_the_prompt_budget():
@@ -149,5 +140,30 @@ def test_semantic_prompt_block_memoises_introspection_across_repeated_calls(monk
 
     assert calls["count"] == 1, "introspection must run once, not per render"
     assert first == second == third
+
+    loader._reset_cache_for_tests()
+
+
+def test_semantic_prompt_block_does_not_cache_a_failed_introspection(monkeypatch):
+    """Regression guard: a DB outage on the first call must not permanently
+    freeze the prompt at the 'introspection was unavailable' fallback -- a
+    later, successful introspection must be reflected once the DB recovers.
+    """
+    loader._reset_cache_for_tests()
+
+    def boom(query, params=None):
+        raise RuntimeError("Can't connect to MySQL server on '10.0.0.5' (111)")
+
+    monkeypatch.setattr(loader, "fetch_all", boom)
+    first = get_semantic_prompt_block()
+    assert "get_schema" in first
+    assert "cars_silver" not in first
+
+    def fake_fetch_all(query, params=None):
+        return [{"name": "cars_silver", "type": "BASE TABLE"}]
+
+    monkeypatch.setattr(loader, "fetch_all", fake_fetch_all)
+    second = get_semantic_prompt_block()
+    assert "cars_silver" in second
 
     loader._reset_cache_for_tests()

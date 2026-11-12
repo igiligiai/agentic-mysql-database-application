@@ -22,12 +22,9 @@ breaking module import.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from api.tools.helpers import infer_layer
 from api.utils.db import fetch_all
 
-SEMANTICS_DIR = Path(__file__).resolve().parent
 MAX_RENDER_BYTES = 4096
 
 _LAYER_ORDER = {"bronze": 0, "silver": 1, "gold": 2}
@@ -145,12 +142,19 @@ def get_semantic_prompt_block() -> str:
     """Build the semantic prompt block once and reuse it on later calls.
 
     Introspection is a metadata query, not something to repeat on every turn
-    or every tool call, so the result is cached here after first use.
+    or every tool call, so the result is cached here after first use. A
+    *failed* introspection (empty objects list) is deliberately not cached:
+    caching it would freeze the "introspection was unavailable" fallback text
+    for the process lifetime even after the database recovers.
     """
     global _cached_block
     if _cached_block is None:
-        inventory = render_schema_inventory(introspect_schema())
-        _cached_block = f"{STATIC_GUIDANCE}\n\n{inventory}"
+        objects = introspect_schema()
+        inventory = render_schema_inventory(objects)
+        block = f"{STATIC_GUIDANCE}\n\n{inventory}"
+        if not objects:
+            return block
+        _cached_block = block
     return _cached_block
 
 
