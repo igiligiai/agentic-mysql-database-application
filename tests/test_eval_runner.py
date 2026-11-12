@@ -52,6 +52,31 @@ def test_row_count_is_checked():
     assert score_case({"id": "a", "assert": {"row_count": 4}}, "ok", tools)["passed"] is False
 
 
+def test_tool_error_code_is_checked_against_the_structured_result():
+    forbidden = [
+        {"name": "execute_sql", "args": {}, "result": {"code": "SQL_FORBIDDEN", "retryable": False}}
+    ]
+    case = {"id": "a", "assert": {"tool_error_code": "SQL_FORBIDDEN"}}
+    assert score_case(case, "ok", forbidden)["passed"] is True
+
+    wrong_code = [
+        {"name": "execute_sql", "args": {}, "result": {"code": "SQL_SYNTAX", "retryable": True}}
+    ]
+    assert score_case(case, "ok", wrong_code)["passed"] is False
+
+
+def test_tool_retryable_distinguishes_forbidden_from_syntax_errors():
+    forbidden_case = {"id": "a", "assert": {"tool_retryable": False}}
+    syntax_case = {"id": "a", "assert": {"tool_retryable": True}}
+
+    forbidden = [{"name": "execute_sql", "args": {}, "result": {"retryable": False}}]
+    syntax = [{"name": "execute_sql", "args": {}, "result": {"retryable": True}}]
+
+    assert score_case(forbidden_case, "ok", forbidden)["passed"] is True
+    assert score_case(syntax_case, "ok", forbidden)["passed"] is False
+    assert score_case(syntax_case, "ok", syntax)["passed"] is True
+
+
 def test_aggregate_computes_accuracy_and_tool_metrics():
     results = [
         {"id": "a", "passed": True, "failures": [], "tools_called": ["execute_sql"],

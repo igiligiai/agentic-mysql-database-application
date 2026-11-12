@@ -81,6 +81,31 @@ def score_case(
         if checks["row_count"] not in counts:
             failures.append(f"row_count {checks['row_count']} not seen in {counts}")
 
+    # Structured-error checks. These inspect the typed ToolError dict a tool
+    # result carries on failure (api/utils/errors.py), not the free-form
+    # reply text -- the SQL_FORBIDDEN/SQL_SYNTAX and retryable/non-retryable
+    # distinctions are exact contract facts, not something a regex on
+    # natural-language prose should stand in for.
+    if "tool_error_code" in checks:
+        codes = [
+            (c.get("result") or {}).get("code")
+            for c in tool_calls
+            if isinstance(c.get("result"), dict) and "code" in c["result"]
+        ]
+        if checks["tool_error_code"] not in codes:
+            failures.append(f"tool_error_code {checks['tool_error_code']!r} not seen in {codes}")
+
+    if "tool_retryable" in checks:
+        retryables = [
+            (c.get("result") or {}).get("retryable")
+            for c in tool_calls
+            if isinstance(c.get("result"), dict) and "retryable" in c["result"]
+        ]
+        if checks["tool_retryable"] not in retryables:
+            failures.append(
+                f"tool_retryable {checks['tool_retryable']!r} not seen in {retryables}"
+            )
+
     return {
         "id": case["id"],
         "passed": not failures,
