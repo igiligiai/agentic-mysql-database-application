@@ -83,3 +83,39 @@ def test_message_content_is_never_stored():
 
 def test_estimate_cost_is_zero_for_an_unknown_model():
     assert telemetry.estimate_cost("not-a-model", 1000, 1000) == 0.0
+
+
+def test_tool_span_extra_keys_are_dropped():
+    telemetry.record_turn(
+        {
+            "session_id": "s1",
+            "duration_ms": 1,
+            "tool_spans": [
+                {
+                    "name": "execute_sql",
+                    "duration_ms": 5,
+                    "ok": True,
+                    "error_code": None,
+                    "sql": "SELECT * FROM cars WHERE vin='SECRET123'",
+                    "preview_row": {"vin": "SECRET123"},
+                    "question": "what is my customer's vin?",
+                }
+            ],
+        }
+    )
+    stored_span = telemetry.records()[0]["tool_spans"][0]
+    assert set(stored_span.keys()) == {"name", "duration_ms", "ok", "error_code"}
+    serialized = repr(telemetry.records())
+    assert "SECRET123" not in serialized
+    assert "customer" not in serialized
+
+
+def test_non_dict_tool_span_entry_is_dropped():
+    telemetry.record_turn(
+        {
+            "session_id": "s1",
+            "duration_ms": 1,
+            "tool_spans": ["not-a-dict", 42, None],
+        }
+    )
+    assert telemetry.records()[0]["tool_spans"] == []

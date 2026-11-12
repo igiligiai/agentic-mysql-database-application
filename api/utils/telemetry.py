@@ -28,6 +28,17 @@ _ALLOWED_KEYS = frozenset(
     }
 )
 
+# Mirrors _ALLOWED_KEYS, but for entries nested inside "tool_spans". Keeps
+# future span fields (e.g. SQL text, row previews) out of the buffer too.
+_ALLOWED_SPAN_KEYS = frozenset(
+    {
+        "name",
+        "duration_ms",
+        "ok",
+        "error_code",
+    }
+)
+
 # USD per 1000 tokens. Unknown models cost 0.0 rather than guessing.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (0.0025, 0.01),
@@ -48,7 +59,14 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 
 
 def record_turn(record: dict[str, Any]) -> None:
-    _records.append({k: v for k, v in record.items() if k in _ALLOWED_KEYS})
+    filtered = {k: v for k, v in record.items() if k in _ALLOWED_KEYS}
+    if "tool_spans" in filtered:
+        filtered["tool_spans"] = [
+            {k: v for k, v in span.items() if k in _ALLOWED_SPAN_KEYS}
+            for span in filtered["tool_spans"]
+            if isinstance(span, dict)
+        ]
+    _records.append(filtered)
 
 
 def records() -> list[dict[str, Any]]:
@@ -81,10 +99,6 @@ def snapshot() -> dict[str, Any]:
         code = record.get("error_code")
         if code:
             errors[str(code)] += 1
-        for span in record.get("tool_spans") or []:
-            span_code = span.get("error_code")
-            if span_code and not record.get("error_code"):
-                errors[str(span_code)] += 1
 
     input_tokens = sum(int(r.get("input_tokens") or 0) for r in items)
     output_tokens = sum(int(r.get("output_tokens") or 0) for r in items)
