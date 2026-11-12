@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
+from api.semantics.loader import load_semantics, render_semantics
 from api.tools import dispatch_tool
 from api.tools.helpers import (
     _build_langgraph_tools,
@@ -20,7 +21,7 @@ from api.tools.helpers import (
 from api.utils.errors import MAX_CONSECUTIVE_REPAIRS, is_tool_error
 from api.utils.trimmer import trim_messages
 
-SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
+BASE_SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
 You help users query data, explore schema, trace table lineage, and understand their data.
 
 Your capabilities:
@@ -40,6 +41,11 @@ Guidelines:
 - Be concise but thorough
 
 Current database: Car data warehouse (bronze/silver/gold layers)"""
+
+# The semantic layer is part of the prompt, so changing glossary.yaml or
+# exemplars.yaml is a behaviour change. Every glossary term is covered by an
+# eval case in tests/eval/cases.yaml.
+SYSTEM_PROMPT = f"{BASE_SYSTEM_PROMPT}\n\n{render_semantics(load_semantics())}"
 
 TOOLS_FILE_PATH = Path(__file__).resolve().parent / "utils" / "tools.json"
 
