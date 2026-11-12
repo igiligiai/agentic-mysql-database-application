@@ -11,11 +11,15 @@ dependencies = [
     "langgraph>=0.3.0",
     "mysql-connector-python>=9.0.0",
     "openai>=1.76.0",
-    "pytest>=8.0",
     "python-dotenv>=1.0.1",
-    "pyyaml>=6.0",
     "sqlglot>=26.0.0",
     "uvicorn>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pyyaml>=6.0",
 ]
 
 [tool.pytest.ini_options]
