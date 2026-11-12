@@ -55,7 +55,7 @@ Know the limits before you try to extend them. These are the real constraints in
 | Recovery | Retryable `ToolError` results drive self-repair, capped at 2 consecutive attempts | A run of unrelated failures still ends the turn, by design |
 | Context | Heuristic trimming (counts, not tokens) | Token budget is approximated, never measured |
 | Observability | Per-turn telemetry buffer + `GET /metrics` | Latency, token, and error-code counts per turn are now visible |
-| Evaluation | Golden-set corpus in `tests/eval/` with a committed accuracy baseline | Prompt/tool changes have a regression signal, gated behind `pytest -m eval` |
+| Evaluation | Golden-set corpus in `tests/eval/`, baseline.json is a placeholder (no scores collected yet) | Prompt/tool changes have a regression signal, gated behind `pytest -m eval` |
 | Concurrency | Sync FastAPI handlers calling blocking `mysql-connector` | A slow query blocks a worker thread |
 
 ---
