@@ -1,0 +1,34 @@
+-- AutoBase eval fixture: deterministic seed for cases flagged `requires_fixture: true`
+-- in tests/eval/cases.yaml.
+--
+-- DEFERRED: this file could not be generated in the environment that built this
+-- harness because there was no running MySQL server and no .env credentials
+-- available to connect with. It is intentionally NOT a real dump. Generate it
+-- yourself with the commands below once you have a running `cars_db` (or
+-- equivalent) MySQL instance, then re-run `uv run pytest -m eval -v` with
+-- AUTOBASE_EVAL_FIXTURE=1 set so the fixture-dependent cases stop skipping.
+--
+-- Step 1: capture the real schema (no data), from the project's .env values:
+--
+--   mysqldump --no-data --skip-add-drop-table --user=root --password cars_db `
+--     | Out-File -Encoding utf8 tests\eval\fixture.sql
+--
+-- Step 2: replace this seed block below with one matching your actual dumped
+-- column list for cars_silver (car_id, make, model, year, price_usd,
+-- mileage_km, fuel_type, bronze_id, cleaned_at per docs/explainer.md). The
+-- row_count_against_fixture_seed case in cases.yaml expects exactly 3 rows:
+--
+--   INSERT INTO cars_silver (car_id, make, model, year, price_usd, mileage_km, fuel_type) VALUES
+--     (1, 'Toyota', 'Corolla', 2019, 18000.00, 42000, 'petrol'),
+--     (2, 'Toyota', 'Camry',   2021, 26000.00, 15000, 'hybrid'),
+--     (3, 'BMW',    '320i',    2020, 31000.00, 28000, 'diesel');
+--
+-- Step 3: replay it into a scratch database and verify the row count:
+--
+--   mysql --user=root --password -e "CREATE DATABASE IF NOT EXISTS autobase_eval"
+--   Get-Content tests\eval\fixture.sql | mysql --user=root --password autobase_eval
+--   mysql --user=root --password -e "SELECT COUNT(*) FROM autobase_eval.cars_silver"
+--
+-- Expected: a row count of 3, no errors. Then point the app's DB config at
+-- autobase_eval (or load the same seed into cars_db) and set
+-- AUTOBASE_EVAL_FIXTURE=1 before running `uv run pytest -m eval -v`.

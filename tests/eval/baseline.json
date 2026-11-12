@@ -1,0 +1,10 @@
+{
+  "collected": false,
+  "reason": "No live MySQL database and no OPENAI_API_KEY were available in the environment that built this harness, so no real agent run could be performed. This file is a placeholder, not a baseline -- no score below is real.",
+  "accuracy": null,
+  "cases": null,
+  "passed": null,
+  "tool_precision": null,
+  "tool_recall": null,
+  "how_to_collect": "Set OPENAI_API_KEY, point the app's DB config at a running MySQL instance with the AutoBase schema, run `uv run pytest -m eval -v` (it will skip with 'no baseline.json yet'), then copy tests/eval/last_run.json over this file and re-run to confirm the CI accuracy gate passes."
+}

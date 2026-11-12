@@ -4,6 +4,7 @@ from api.semantics.loader import (
     load_semantics,
     render_semantics,
 )
+from tests.eval.runner import load_cases
 
 
 def test_semantics_load_from_the_package_directory():
@@ -57,3 +58,15 @@ def test_a_malformed_file_raises(tmp_path):
 
 def test_semantics_dir_is_inside_the_api_package():
     assert SEMANTICS_DIR.name == "semantics"
+
+
+def test_every_glossary_term_is_covered_by_an_eval_case():
+    """A prompt change is a behaviour change, so every term needs a case."""
+    covered = {
+        str(term).lower()
+        for case in load_cases()
+        for term in (case.get("covers_terms") or [])
+    }
+    terms = {entry["term"].lower() for entry in load_semantics()["glossary"]}
+    missing = terms - covered
+    assert not missing, f"glossary terms with no eval case: {sorted(missing)}"
