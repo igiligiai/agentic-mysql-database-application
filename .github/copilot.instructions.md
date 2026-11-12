@@ -28,11 +28,17 @@ agentic-mysql-database-application/
 │   ├── agent.py             # AgenticWorkflow dataclass + LangGraph orchestration
 │   ├── tools/
 │   │   ├── __init__.py      # Public re-exports of all tool functions + dispatch_tool
-│   │   ├── handlers.py      # One function per tool (execute_sql_tool, etc.) + dispatch_tool()
+│   │   ├── handlers.py      # Metadata tool handlers (get_schema_tool, etc.) + dispatch_tool()
+│   │   ├── sql_tools.py     # SQL-executing tool handlers (execute_sql_tool, explain_query_tool)
 │   │   └── helpers.py       # Pure utilities: DB helpers, LangGraph wiring, LLM factory
+│   ├── semantics/
+│   │   └── loader.py        # Live information_schema inventory rendered into the system prompt
 │   └── utils/
-│       ├── config.py        # Env var loading, DB_CONFIG, path constants, context window defaults
+│       ├── config.py        # Env var loading, DB_CONFIG, path constants, context/query defaults
 │       ├── db.py            # Connection pool, fetch_all / fetch_one / fetch_matrix, JSON sanitization
+│       ├── sql_guard.py     # AST-based SQL validation/rewriting (sqlglot) — the read-only guard
+│       ├── errors.py        # Structured, redacted ToolError contract
+│       ├── telemetry.py     # Per-turn telemetry buffer backing GET /metrics
 │       ├── trimmer.py       # Context window trimming — trims LangGraph state messages before each invocation
 │       └── tools.json       # OpenAI function-calling schema (source of truth for tool contracts)
 └── front/
@@ -217,6 +223,11 @@ Before each `agent.invoke()`, the prior LangGraph state is trimmed to control th
 
 Follow these steps in order. Do not skip steps.
 
+SQL-executing tools (anything that runs or plans SQL, e.g. `execute_sql`, `explain_query`) live
+in `api/tools/sql_tools.py`; everything else (metadata/introspection tools, e.g. `get_schema`,
+`describe_table`) lives in `api/tools/handlers.py`. Both are wired through the same
+`dispatch_tool()` in `handlers.py` — never branch on tool kind outside that function.
+
 ### Step 1 — Define the schema in `tools.json`
 
 ```json
@@ -239,7 +250,7 @@ Follow these steps in order. Do not skip steps.
 }
 ```
 
-### Step 2 — Implement the handler in `handlers.py`
+### Step 2 — Implement the handler in `handlers.py` (or `sql_tools.py` for SQL-executing tools)
 
 ```python
 def my_new_tool_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -422,7 +433,7 @@ The system prompt defines the agent's persona ("AutoBase") and capabilities. Whe
 
 - **Parameterised queries only** for all user-supplied values passed as data.
 - **`validate_identifier()`** for all user-supplied table/column names that must be interpolated. This function raises `HTTPException(400)` if the name contains anything other than `[A-Za-z_][A-Za-z0-9_]*`.
-- The `execute_sql_tool` regex guard (`^SELECT\s`) must remain. Never allow DDL or DML through this tool.
+- The `execute_sql_tool` and `explain_query_tool` guard (`api/utils/sql_guard.py`) must remain. Validation is AST-based (sqlglot), not a regex: it rejects multi-statement input, any DML/DDL node anywhere in the parse tree, `SELECT ... INTO`, `SLEEP`/`BENCHMARK`/`LOAD_FILE`-style functions, and out-of-scope schema qualifiers, and it injects or clamps `LIMIT`. Never widen it without an explicit security review.
 
 ### API key handling
 
@@ -528,7 +539,7 @@ When adding new tables or views to the MySQL database, follow these naming conve
 | Creating a new `ChatOpenAI` per request             | Agent is cached in `_agent_cache`; reuse it                                     |
 | String-interpolating table names directly           | Always call `validate_identifier()` first                                       |
 | Adding business logic to `app.py` routes            | Routes call `agent.run_tool()` or `agent.run_chat()`; logic belongs in handlers |
-| Returning Python exceptions in tool results         | Raise `HTTPException`; let FastAPI handle serialisation                         |
+| Returning Python exceptions in tool results         | Raise `HTTPException` — **except** the one sanctioned shape: tools may return a `ToolError` dict from `api/utils/errors.py` (never a traceback, never a credential) so the agent can self-repair retryable failures |
 | Returning `date`/`Decimal` from DB without sanitize | All `fetch_*` functions auto-sanitize; don't bypass with raw cursor calls       |
 | Adding context trimming logic outside `trimmer.py`  | All trimming goes through `trim_messages()` in `trimmer.py`                     |
 | Naming a function the same as a `let` variable      | JS `let` + `function` with same name causes `SyntaxError` — use distinct names  |

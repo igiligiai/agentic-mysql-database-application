@@ -8,6 +8,11 @@ plain-English explanations.
 The entire intelligence loop runs on the **Python backend**; the browser is a passive display
 layer. OpenAI credentials never leave the server.
 
+> The narrative above (and the `cars_*` table names used as examples throughout this README)
+> describe a demo car-sales schema used for offline/demo mode. The database AutoBase is
+> actually pointed at is whatever schema `DB_NAME` resolves to — the agent introspects it live
+> via `information_schema` and does not assume any fixed table names.
+
 Python-first agentic MySQL application with two main folders:
 
 - api: FastAPI backend and database tools
@@ -36,18 +41,22 @@ entirely — no token cost for plain data browsing.
 | Entrypoint | `main.py` | Starts uvicorn on `PORT` (default 8000) |
 | HTTP | `api/app.py` | Routes, CORS, static mount of `front/` |
 | Orchestration | `api/agent.py` | `AgenticWorkflow`: agent cache, checkpointer, tool history |
-| Tools | `api/tools/handlers.py` | The 5 real database operations |
+| Tools | `api/tools/handlers.py`, `api/tools/sql_tools.py` | Metadata tools and SQL-executing tools respectively, both routed through `dispatch_tool()` |
 | Tool wiring | `api/tools/helpers.py` | LangChain `@tool` wrappers + agent factory |
+| SQL safety | `api/utils/sql_guard.py` | AST-based validation/rewriting of agent-authored SQL before execution |
+| Error contract | `api/utils/errors.py` | The structured, redacted `ToolError` shape tools return instead of raising |
+| Semantic layer | `api/semantics/loader.py` | Live `information_schema` inventory rendered into the system prompt |
 | Schemas | `api/utils/tools.json` | Single source of truth for tool descriptions |
 | Database | `api/utils/db.py` | MySQL connection pool (size 10) + JSON-safe fetch helpers |
 | Context | `api/utils/trimmer.py` | Context-window trimming strategy |
 | UI | `front/` | Vanilla HTML/CSS/JS SPA, D3 v7 force graph — no framework, no bundler |
 
-## The five tools
+## The six tools
 
 | Tool | What it does |
 | --- | --- |
-| `execute_sql` | Runs a SELECT query; returns columns, rows, row count, and duration |
+| `execute_sql` | Runs a SELECT query, validated and rewritten by the AST guard; returns columns, rows, row count, and duration |
+| `explain_query` | Returns `EXPLAIN` cost/row-estimate output for a SELECT without running it |
 | `get_schema` | Full schema from `information_schema`, with PK/FK/IDX tags and bronze/silver/gold layer inference |
 | `get_table_lineage` | Builds `{nodes, edges}` from FK relationships and parsed view definitions |
 | `describe_table` | Row count, last update time, 3 sample rows, inferred layer |
@@ -68,8 +77,16 @@ frontend sidebar.
 
 ## Security model
 
-- **SELECT-only guard:** `execute_sql` regex-rejects any non-SELECT query with HTTP 400 — the
-	LLM cannot mutate data.
+- **AST-validated, read-only SQL:** `execute_sql` and `explain_query` are parsed with sqlglot
+	(`api/utils/sql_guard.py`) before anything runs. Multi-statement input, any DML/DDL node
+	anywhere in the tree, `SELECT ... INTO`, `SLEEP`/`BENCHMARK`/`LOAD_FILE`-style functions, and
+	out-of-scope schema qualifiers are all rejected; a missing or oversized `LIMIT` is injected
+	or clamped rather than left to the caller. The LLM cannot mutate data.
+- **Structured, redacted tool errors:** failures come back as a typed `ToolError` dict
+	(`api/utils/errors.py` is the single source of truth for the error-code table) instead of a
+	raw exception, so the agent can self-correct retryable failures. A redaction pass strips
+	credentials, hosts, and filesystem paths before any driver text reaches the LLM or an HTTP
+	response.
 - **Identifier validation:** dynamic table names pass through `validate_identifier()`
 	(`^[A-Za-z_][A-Za-z0-9_]*$`) and are backtick-quoted before interpolation.
 - **Server-side credentials:** `OPENAI_API_KEY` and `OPENAI_MODEL` are read from the
@@ -94,14 +111,18 @@ can be explored without a running MySQL instance. Chat is disabled in this mode.
 - POST /ping for database object discovery
 - POST /tool dispatcher with tools:
 	- execute_sql
+	- explain_query
 	- get_schema
 	- get_table_lineage
 	- describe_table
 	- check_data_quality
 - POST /chat for Python-side OpenAI chat + tool-calling orchestration
 - GET/POST /context-config to read and update trim settings at runtime
+- GET /metrics for per-turn telemetry (latency, token counts, tool/error shapes — no message content)
 - LangGraph-based workflow for stateful agent execution and tool routing
-- SELECT-only SQL execution guard for execute_sql
+- AST-validated (sqlglot), read-only SQL guard for execute_sql / explain_query, with LIMIT injection/clamping
+- Structured, redacted tool-error contract that drives bounded agent self-repair
+- Live `information_schema` inventory rendered into the system prompt (no hand-curated glossary)
 - D3 lineage graph, schema explorer, and chat UI
 
 ## Prerequisites
@@ -121,6 +142,8 @@ Set these in your shell or environment file:
 - PORT (default: 8000)
 - OPENAI_API_KEY (required)
 - OPENAI_MODEL (required)
+- QUERY_MAX_ROWS (default: 1000) — hard ceiling the SQL guard enforces by rewriting/clamping `LIMIT`
+- QUERY_TIMEOUT_MS (default: 5000) — per-connection statement timeout applied in `api/utils/db.py`
 
 OpenAI tool-calling initialization happens in Python backend (`api/agent.py`).
 Frontend does not send API keys.
@@ -155,3 +178,21 @@ python main.py
 - See `docs/explainer.md` for a full end-to-end walkthrough, including a request trace and a LangChain/LangGraph deep dive.
 - Legacy files autobase_server.js and car_data_agent.html are preserved as migration references.
 - Frontend defaults to backend URL http://localhost:8000.
+
+## Testing
+
+```bash
+uv run pytest              # fast suite: guard, errors, semantics, telemetry
+uv run pytest -m eval      # agent evaluation; needs OPENAI_API_KEY and MySQL
+```
+
+`tests/eval/fixture.sql` recreates a schema and a deterministic seed for the evaluation corpus:
+
+```bash
+mysql -u root -p -e "CREATE DATABASE autobase_eval"
+mysql -u root -p autobase_eval < tests/eval/fixture.sql
+```
+
+The default `pytest` invocation skips the `eval` marker (see `pyproject.toml`), since it makes
+live LLM calls and needs a reachable database; run it explicitly and only when you intend to
+spend tokens.

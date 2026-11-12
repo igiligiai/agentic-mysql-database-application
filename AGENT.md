@@ -36,8 +36,9 @@ Three invariants you must not break:
 2. **One source of truth per concern.** Tool descriptions live in `api/utils/tools.json`.
    Session memory lives in the LangGraph checkpointer. Trim settings live in `trimmer._settings`.
    `AgenticWorkflow.history` is a debug log, not state.
-3. **The LLM is read-only against the database.** The `^SELECT\s` guard in `execute_sql_tool`
-   and `validate_identifier()` are load-bearing security controls.
+3. **The LLM is read-only against the database.** The AST-based guard in `api/utils/sql_guard.py`
+   (used by `execute_sql_tool` and `explain_query_tool`) and `validate_identifier()` are
+   load-bearing security controls.
 
 ---
 
@@ -50,11 +51,11 @@ Know the limits before you try to extend them. These are the real constraints in
 | Memory | `InMemorySaver` in `AgenticWorkflow._checkpointer` | All conversation state is lost on restart; no horizontal scaling |
 | Loop depth | `max_steps = 8`, `recursion_limit = max_steps * 2` | Deep multi-tool chains silently hit the limit |
 | Response mode | `agent.invoke()` — blocking | No token streaming; long queries look frozen in the UI |
-| Tool surface | 5 read-only tools | No write path, no profiling, no cross-database joins |
-| Recovery | Tool errors raise `HTTPException` straight up | A single bad SQL guess ends the turn instead of being retried |
+| Tool surface | 6 read-only tools (adds `explain_query`) | Still no write path, no profiling, no cross-database joins |
+| Recovery | Retryable `ToolError` results drive self-repair, capped at 2 consecutive attempts | A run of unrelated failures still ends the turn, by design |
 | Context | Heuristic trimming (counts, not tokens) | Token budget is approximated, never measured |
-| Observability | `history` list + nothing else | No latency, token, or cost attribution per turn |
-| Evaluation | None | No regression signal when the prompt or tools change |
+| Observability | Per-turn telemetry buffer + `GET /metrics` | Latency, token, and error-code counts per turn are now visible |
+| Evaluation | Golden-set corpus in `tests/eval/` with a committed accuracy baseline | Prompt/tool changes have a regression signal, gated behind `pytest -m eval` |
 | Concurrency | Sync FastAPI handlers calling blocking `mysql-connector` | A slow query blocks a worker thread |
 
 ---
@@ -75,15 +76,16 @@ Swap `InMemorySaver` for `langgraph.checkpoint.sqlite.SqliteSaver` (or Postgres 
 multi-worker). Keep it injectable so tests can pass an in-memory saver. This is a
 **one-attribute change** with a large payoff: sessions survive `reload=True` restarts.
 
-### 3.3 Self-correcting SQL — `api/tools/handlers.py`, `api/agent.py`
-Today a malformed query raises and the turn dies. Instead, catch `mysql.connector.Error`
-inside `execute_sql_tool` and return a structured
-`{"error": "...", "hint": "...", "retryable": true}` payload. The ReAct loop will then see the
-error as a `ToolMessage` and can repair the query itself. Cap repair attempts by tracking
-consecutive failures so a loop cannot burn all 8 steps.
+### 3.3 Self-correcting SQL — **done.** `api/tools/sql_tools.py`, `api/utils/errors.py`, `api/agent.py`
+Malformed queries and other SQL failures now return a structured `ToolError` dict
+(`api/utils/errors.py` is the source of truth for the error-code table) instead of raising. The
+ReAct loop sees the error as a `ToolMessage` and can repair the query itself.
+`AgenticWorkflow._consecutive_failures` caps repair attempts at `MAX_CONSECUTIVE_REPAIRS` (2); the
+next retryable failure beyond the cap is downgraded to `retryable: false` so the agent stops and
+reports instead of burning its step budget.
 *Caution:* this intentionally relaxes the "never return exceptions in tool results" pitfall in
 §15 of the instructions — only for this one controlled, typed error shape. Never leak
-tracebacks or connection strings.
+tracebacks or connection strings (the contract includes a redaction pass for this).
 
 ### 3.4 Token-aware trimming — `api/utils/trimmer.py`
 `trim_messages()` currently counts messages and characters. Add a `count_tokens` function
@@ -96,21 +98,29 @@ this module — both are existing invariants.
 start of nearly every conversation. Add a TTL cache (default 300s) with an explicit
 invalidation hook. This cuts first-turn latency noticeably.
 
-### 3.6 Query guardrails — `api/tools/handlers.py`
-Extend the SELECT guard with: a mandatory `LIMIT` injection when none is present, a
-configurable `max_rows`, a statement timeout, and rejection of stacked statements (`;`).
-The system prompt already tells the agent to "warn the user if a query might be slow" —
-make that structurally enforced rather than advisory.
+### 3.6 Query guardrails — **done.** `api/utils/sql_guard.py`, `api/utils/config.py`, `api/utils/db.py`
+SQL is parsed with sqlglot before it runs: stacked statements, any DML/DDL node anywhere in the
+tree, `SELECT ... INTO`, `SLEEP`/`BENCHMARK`/`LOAD_FILE`-style functions and out-of-scope schema
+qualifiers are all rejected. A missing `LIMIT` is injected and an oversized one is clamped to
+`QUERY_DEFAULTS["max_rows"]` (env `QUERY_MAX_ROWS`, default 1000). A per-connection statement
+timeout (`QUERY_DEFAULTS["statement_timeout_ms"]`, env `QUERY_TIMEOUT_MS`, default 5000ms) is
+applied in `api/utils/db.py`.
 
-### 3.7 Observability — new `api/utils/telemetry.py`
-Wrap `run_chat()` and `run_tool()` to record per-turn `{session_id, tool, duration_ms,
-input_tokens, output_tokens, error}`. Expose `GET /metrics`. Without this you cannot tell
-whether a prompt change made the agent better or merely slower.
+### 3.7 Observability — **done.** `api/utils/telemetry.py`, `GET /metrics`
+`run_chat()` and `run_tool()` feed an allow-listed, in-process ring buffer
+(`api/utils/telemetry.py`, `MAX_RECORDS = 500`) recording `{session_id, duration_ms, model,
+input_tokens, output_tokens, est_cost, tool_spans, repairs, error_code}` per turn — message
+content is excluded by construction (only allow-listed keys are ever stored). `GET /metrics`
+exposes an aggregated snapshot: turn count, p50/p95 latency, tool/error counts, token totals,
+estimated cost, and repair rate.
 
-### 3.8 Evaluation harness — new `tests/eval/`
-A YAML corpus of `{question, expected_tools, assertion}` cases run against a test database.
-This is the prerequisite for safely editing `SYSTEM_PROMPT` or `tools.json` descriptions —
-both of which change agent behavior invisibly.
+### 3.8 Evaluation harness — **done.** `tests/eval/`
+A schema-agnostic YAML corpus of `{question, expected_tools, assertion}`-style cases
+(`tests/eval/cases.yaml` or equivalent) runs against the live agent, gated behind the `eval`
+pytest marker (`uv run pytest -m eval`) so it is never part of the default fast suite. This is
+the regression signal for safely editing `SYSTEM_PROMPT`/`BASE_SYSTEM_PROMPT` or `tools.json`
+descriptions — both of which change agent behavior invisibly. No committed accuracy-number
+baseline has been recorded from a live run as part of this task (see the task report for why).
 
 ### 3.9 New tools worth adding
 Follow §6 of the instructions file for each. Candidates, in value order:
@@ -119,7 +129,6 @@ Follow §6 of the instructions file for each. Candidates, in value order:
 | --- | --- |
 | `profile_column` | Distribution, cardinality, min/max, top-N values for a single column |
 | `suggest_query` | Return candidate SQL **without** executing it (plan-then-confirm UX) |
-| `explain_query` | `EXPLAIN` output so the agent can self-assess cost before running |
 | `find_related_tables` | Join-path discovery between two tables via the FK graph |
 | `compare_tables` | Row-count and schema drift between bronze/silver/gold counterparts |
 
@@ -138,9 +147,10 @@ These supplement — never replace — §10 Security and §15 Common Pitfalls in
   unusable result or its description is ambiguous. Fix the tool.
 - **Never widen the SQL guard.** If a feature appears to need writes, add a separate,
   explicitly-gated tool with its own confirmation flow — do not loosen `execute_sql`.
-- **Preserve the two-layer tool design.** `handlers.py` holds logic; `helpers.py` holds the
-  LangChain wrapper. The `/tool` endpoint and the agent must keep sharing the same handler, so
-  the Schema Explorer and Lineage Graph continue to work without an LLM.
+- **Preserve the tool-layer split.** `handlers.py` and `sql_tools.py` hold tool logic (metadata
+  vs. SQL-executing tools respectively); `helpers.py` holds only the LangChain wrapper. The
+  `/tool` endpoint and the agent must keep sharing the same `dispatch_tool()`, so the Schema
+  Explorer and Lineage Graph continue to work without an LLM.
 - **Every new tool needs a demo-mode branch** in `front/app.js` (`executeToolDemo()`), or the
   offline UI silently breaks.
 - **Prefer additive endpoints.** `/chat` is consumed by the existing frontend; add
@@ -154,10 +164,10 @@ A feature is complete when all of the following hold:
 
 1. `tools.json`, the handler, `dispatch_tool()`, `__init__.py` exports, the LangGraph wrapper,
    and the demo-mode branch are all updated (for new tools).
-2. `python main.py` starts cleanly and `POST /ping` succeeds.
+2. `uv run main.py` starts cleanly and `POST /ping` succeeds.
 3. The new capability is exercised through `/chat` at least once — confirm the agent actually
    *chooses* the tool, not just that the tool works when called directly.
 4. Context trimming still works on a long session (send >10 turns; confirm no context error).
-5. Security controls are intact: SELECT-only guard, `validate_identifier()` on every
-   interpolated identifier, no API key in any response payload.
+5. Security controls are intact: the AST-based SQL guard (`api/utils/sql_guard.py`),
+   `validate_identifier()` on every interpolated identifier, no API key in any response payload.
 6. `README.md` endpoint/feature lists are updated if the public surface changed.
