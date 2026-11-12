@@ -65,3 +65,22 @@ def test_chat_never_forwards_a_bare_exception_message(monkeypatch):
     detail = response.json()["detail"]
     assert "hunter2" not in detail
     assert "10.0.0.5" not in detail
+
+
+def test_chat_redacts_a_value_error_instead_of_forwarding_it_verbatim(monkeypatch):
+    # ValueError can originate anywhere inside agent.invoke() (langchain/openai
+    # /json internals), so its text must go through the same redaction helper
+    # as every other exception arm -- never str(exc) verbatim.
+    def boom(*_args, **_kwargs):
+        raise ValueError(
+            "invalid config: mysql://root:hunter2@10.0.0.5:3306/cars"
+        )
+
+    monkeypatch.setattr(app_module.agent, "run_chat", boom)
+
+    response = _client().post("/chat", json={"message": "hi"})
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "hunter2" not in detail
+    assert "10.0.0.5" not in detail

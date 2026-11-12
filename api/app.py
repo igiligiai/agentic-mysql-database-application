@@ -14,7 +14,7 @@ from api.agent import AgenticWorkflow
 from api.utils.config import FRONT_DIR, get_port
 from api.utils.db import fetch_all
 from api.utils import telemetry
-from api.utils.errors import from_mysql_error, is_tool_error
+from api.utils.errors import from_mysql_error, is_tool_error, redact
 from api.utils.trimmer import get_trim_settings, update_trim_settings
 
 app = FastAPI(title="AutoBase API", version="1.0.0")
@@ -108,7 +108,10 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
             session_id=payload.session_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # ValueError can originate anywhere inside agent.invoke() (langchain/
+        # openai/json internals), so it is redacted exactly like every other
+        # exception arm here -- never str(exc) verbatim.
+        raise HTTPException(status_code=400, detail=redact(str(exc))) from exc
     except HTTPException:
         raise
     except Error as exc:

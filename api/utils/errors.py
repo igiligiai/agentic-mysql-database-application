@@ -124,6 +124,16 @@ def _redact(text: str) -> str:
     return cleaned.strip()
 
 
+def redact(text: str) -> str:
+    """Public wrapper around ``_redact`` for callers outside this module.
+
+    api/app.py is the one place a raw exception's ``str()`` may legitimately
+    need to reach an HTTP response body (a config/validation ``ValueError``),
+    so it must still go through the same redaction used everywhere else.
+    """
+    return _redact(text)
+
+
 def tool_error(code: str, *, detail: str = "", hint: str = "") -> dict[str, Any]:
     """Build the canonical error dict. Unknown codes degrade to SQL_FAILED."""
     resolved = code if code in _CATALOG else _FALLBACK_CODE
