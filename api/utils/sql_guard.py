@@ -113,11 +113,21 @@ def validate_query(
         return GuardRejection("SQL_FORBIDDEN", "SELECT ... INTO is not permitted.")
 
     for function_node in statement.find_all(exp.Anonymous):
-        name = str(function_node.this or "").lower()
+        # ``.name`` unwraps sqlglot's ``Identifier`` wrapper, so it matches
+        # regardless of backtick-quoting (e.g. `` `sleep` `` still yields
+        # "sleep") -- unlike ``str(function_node.this)``, which would include
+        # the backticks and never match ``_FORBIDDEN_FUNCTIONS``.
+        name = function_node.name.lower()
         if name in _FORBIDDEN_FUNCTIONS:
             return GuardRejection(
                 "SQL_FORBIDDEN", f"The function {name.upper()} is not permitted."
             )
+
+    if statement.args.get("locks"):
+        return GuardRejection(
+            "SQL_FORBIDDEN",
+            "Locking reads (FOR UPDATE / LOCK IN SHARE MODE) are not permitted.",
+        )
 
     permitted_schemas = {s.lower() for s in allowed_schemas} | {
         s.lower() for s in READ_ONLY_SCHEMAS

@@ -59,6 +59,38 @@ def test_load_file_is_rejected():
     assert _reject("SELECT LOAD_FILE('/etc/passwd')").code == "SQL_FORBIDDEN"
 
 
+def test_backtick_quoted_sleep_is_rejected():
+    assert _reject("SELECT `sleep`(5)").code == "SQL_FORBIDDEN"
+
+
+def test_backtick_quoted_benchmark_is_rejected():
+    assert _reject("SELECT `BENCHMARK`(10, MD5('a'))").code == "SQL_FORBIDDEN"
+
+
+def test_backtick_quoted_load_file_is_rejected():
+    assert _reject("SELECT `LOAD_FILE`('/etc/hostname')").code == "SQL_FORBIDDEN"
+
+
+def test_backtick_quoted_get_lock_is_rejected():
+    assert _reject("SELECT `GET_LOCK`('lockname', 10)").code == "SQL_FORBIDDEN"
+
+
+def test_backtick_quoted_release_lock_is_rejected():
+    assert _reject("SELECT `RELEASE_LOCK`('lockname')").code == "SQL_FORBIDDEN"
+
+
+def test_mixed_case_backtick_sleep_is_rejected():
+    assert _reject("SELECT `Sleep`(5)").code == "SQL_FORBIDDEN"
+
+
+def test_select_for_update_is_rejected():
+    assert _reject("SELECT * FROM cars FOR UPDATE").code == "SQL_FORBIDDEN"
+
+
+def test_select_lock_in_share_mode_is_rejected():
+    assert _reject("SELECT * FROM cars LOCK IN SHARE MODE").code == "SQL_FORBIDDEN"
+
+
 def test_cross_database_reference_is_rejected():
     assert _reject("SELECT * FROM otherdb.cars").code == "SQL_FORBIDDEN"
 
