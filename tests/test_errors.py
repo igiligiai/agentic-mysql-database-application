@@ -84,3 +84,30 @@ def test_tracebacks_never_leak_into_the_error():
     err = from_mysql_error(RuntimeError('File "/app/api/utils/db.py", line 42, in fetch_matrix'))
     assert "db.py" not in err["error"]
     assert err["code"] == "SQL_FAILED"
+
+
+def test_connection_string_uris_never_leak_into_the_error():
+    err = tool_error("SQL_SYNTAX", detail="near mysql://root:hunter2@10.0.0.5:3306/cars_db")
+    assert "hunter2" not in err["error"]
+    assert "10.0.0.5" not in err["error"]
+    assert "root" not in err["error"]
+
+
+def test_bare_or_quoted_hostnames_never_leak_into_the_error():
+    err = tool_error("SQL_SYNTAX", detail="Host '10.0.0.5' is not allowed to connect")
+    assert "10.0.0.5" not in err["error"]
+
+
+def test_filesystem_paths_without_py_suffix_never_leak_into_the_error():
+    err = tool_error("TOOL_BAD_ARGS", detail="cannot read /etc/passwd")
+    assert "/etc/passwd" not in err["error"]
+
+    err_win = tool_error(
+        "TOOL_BAD_ARGS", detail=r"cannot read C:\Users\Administrator\AppData\mysql.sock"
+    )
+    assert "mysql.sock" not in err_win["error"]
+
+
+def test_alternate_password_spelling_never_leaks_into_the_error():
+    err = tool_error("SQL_FORBIDDEN", detail="connect failed pwd=Sup3rSecret!")
+    assert "Sup3rSecret!" not in err["error"]

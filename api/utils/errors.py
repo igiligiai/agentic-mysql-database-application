@@ -83,11 +83,19 @@ _ERRNO_TO_CODE: dict[int, str] = {
 # text can reach a tool result. Belt and braces: _CATALOG already decides which
 # codes may forward a driver message at all.
 _REDACTIONS: tuple[str, ...] = (
+    # scheme://user:pass@host[:port]/path credential URIs (mysql://, postgres://, ...).
+    r"(?i)\b[a-z][a-z0-9+.-]*://\S+",
     r"'[^']*'@'[^']*'",
     r"(?i)using password:[^)]*",
+    # password=, passwd=, pwd= (and the ':' variants) in key=value form.
+    r"(?i)\b(?:password|passwd|pwd)\b\s*[:=]\s*\S+",
     r"(?i)[a-z]:\\[^\s\"']+",
-    r"/[\w./-]+\.py",
-    r"(?i)\bpassword\b\s*[:=]\s*\S+",
+    # Windows UNC paths: \\host\share\path...
+    r"\\\\[\w.$-]+(?:\\[\w.$-]+)+",
+    # POSIX filesystem paths of any extension (or none), e.g. /etc/passwd.
+    r"/(?:[\w.-]+/)+[\w.-]+",
+    # Bare IPv4 addresses, quoted or not, e.g. '10.0.0.5' or 10.0.0.5.
+    r"\b\d{1,3}(?:\.\d{1,3}){3}\b",
 )
 
 
