@@ -432,7 +432,7 @@ The system prompt defines the agent's persona ("AutoBase") and capabilities. Whe
 ### SQL injection prevention
 
 - **Parameterised queries only** for all user-supplied values passed as data.
-- **`validate_identifier()`** for all user-supplied table/column names that must be interpolated. This function raises `HTTPException(400)` if the name contains anything other than `[A-Za-z_][A-Za-z0-9_]*`.
+- **`validate_identifier()`** for all user-supplied table/column names that must be interpolated. This function raises `InvalidIdentifierError` if the name contains anything other than `[A-Za-z_][A-Za-z0-9_]*`.
 - The `execute_sql_tool` and `explain_query_tool` guard (`api/utils/sql_guard.py`) must remain. Validation is AST-based (sqlglot), not a regex: it rejects multi-statement input, any DML/DDL node anywhere in the parse tree, `SELECT ... INTO`, `SLEEP`/`BENCHMARK`/`LOAD_FILE`-style functions, and out-of-scope schema qualifiers, and it injects or clamps `LIMIT`. Never widen it without an explicit security review.
 
 ### API key handling
