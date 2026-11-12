@@ -6,7 +6,7 @@ from typing import Any
 
 from mysql.connector import pooling
 
-from .config import DB_CONFIG
+from .config import DB_CONFIG, QUERY_DEFAULTS
 
 
 def _sanitize(value: Any) -> Any:
@@ -39,10 +39,21 @@ def get_pool() -> pooling.MySQLConnectionPool:
     return _pool
 
 
+def _apply_session_limits(cursor: Any) -> None:
+    """Cap how long a SELECT may run on this pooled connection.
+
+    MySQL's max_execution_time applies only to read-only SELECTs, which is
+    exactly the surface the agent can reach.
+    """
+    timeout_ms = int(QUERY_DEFAULTS["statement_timeout_ms"])
+    cursor.execute(f"SET SESSION max_execution_time = {timeout_ms}")
+
+
 def fetch_all(query: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
     conn = get_pool().get_connection()
     cursor = conn.cursor(dictionary=True)
     try:
+        _apply_session_limits(cursor)
         cursor.execute(query, params or ())
         return [_sanitize_row(r) for r in cursor.fetchall()]
     finally:
@@ -59,6 +70,7 @@ def fetch_matrix(query: str) -> tuple[list[str], list[list[Any]]]:
     conn = get_pool().get_connection()
     cursor = conn.cursor()
     try:
+        _apply_session_limits(cursor)
         cursor.execute(query)
         rows = cursor.fetchall()
         columns = [col[0] for col in (cursor.description or [])]

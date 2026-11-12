@@ -32,3 +32,11 @@ CONTEXT_DEFAULTS: dict[str, int | bool] = {
     "keep_last_n_pairs": int(os.getenv("CTX_KEEP_LAST_N_PAIRS", "10")),
     "trim_enabled": os.getenv("CTX_TRIM_ENABLED", "true").lower() == "true",
 }
+
+# ── Query safety defaults ───────────────────────────────────────
+# max_rows is the hard ceiling the SQL guard enforces by rewriting the query.
+# statement_timeout_ms is applied per connection checkout in db.py.
+QUERY_DEFAULTS: dict[str, int] = {
+    "max_rows": int(os.getenv("QUERY_MAX_ROWS", "1000")),
+    "statement_timeout_ms": int(os.getenv("QUERY_TIMEOUT_MS", "5000")),
+}

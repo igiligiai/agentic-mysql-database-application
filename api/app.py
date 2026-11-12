@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from api.agent import AgenticWorkflow
 from api.utils.config import FRONT_DIR, get_port
 from api.utils.db import fetch_all
+from api.utils.errors import is_tool_error
 from api.utils.trimmer import get_trim_settings, update_trim_settings
 
 app = FastAPI(title="AutoBase API", version="1.0.0")
@@ -79,12 +80,20 @@ async def ping() -> dict[str, Any]:
 @app.post("/tool")
 async def tool_dispatch(payload: ToolRequest) -> dict[str, Any]:
     try:
-        return agent.run_tool(payload.tool, payload.args)
-
+        result = agent.run_tool(payload.tool, payload.args)
     except HTTPException:
         raise
     except Error as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Handlers return ToolError dicts so the agent can repair itself. The
+    # non-LLM frontend callers (Schema Explorer, Lineage Graph) expect HTTP
+    # errors, so this is the single conversion point.
+    if is_tool_error(result):
+        status = 400 if result["code"] in {"SQL_FORBIDDEN", "TOOL_BAD_ARGS"} else 500
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
 
 
 @app.post("/chat")
