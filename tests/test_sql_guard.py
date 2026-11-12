@@ -189,3 +189,63 @@ def test_limit_is_injected_on_a_cte_query():
     assert isinstance(result, GuardResult)
     assert result.limit_injected is True
     assert result.sql.endswith("LIMIT 25")
+
+
+def test_parenthesised_union_in_subquery_with_for_update_is_rejected():
+    """Regression: Union node's locks arg is not on the Select branches."""
+    assert _reject(
+        "SELECT * FROM ((SELECT 1) UNION (SELECT id FROM t) FOR UPDATE) y"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_parenthesised_union_in_cte_with_for_update_is_rejected():
+    """Regression: Union node's locks arg inside CTE."""
+    assert _reject(
+        "WITH x AS ((SELECT 1) UNION (SELECT id FROM t) FOR UPDATE) SELECT * FROM x"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_parenthesised_union_in_in_clause_with_for_update_is_rejected():
+    """Regression: Union node's locks arg inside IN clause."""
+    assert _reject(
+        "SELECT * FROM a WHERE id IN ((SELECT 1) UNION (SELECT id FROM t) FOR UPDATE)"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_parenthesised_union_with_lock_in_share_mode_is_rejected():
+    """Regression: Union node's locks arg with LOCK IN SHARE MODE."""
+    assert _reject(
+        "SELECT * FROM ((SELECT 1) UNION (SELECT id FROM t) LOCK IN SHARE MODE) y"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_parenthesised_union_without_locking_is_still_allowed():
+    """Verify parenthesised unions without locking still pass."""
+    result = validate_query("SELECT * FROM ((SELECT 1) UNION (SELECT id FROM u)) y")
+    assert isinstance(result, GuardResult)
+
+
+def test_cte_without_locking_is_still_allowed():
+    """Verify CTEs continue to pass."""
+    result = validate_query("WITH x AS (SELECT 1 AS n) SELECT n FROM x")
+    assert isinstance(result, GuardResult)
+
+
+def test_join_is_still_allowed():
+    """Verify joins continue to pass."""
+    result = validate_query("SELECT * FROM a JOIN b ON a.id = b.id")
+    assert isinstance(result, GuardResult)
+
+
+def test_aggregate_with_group_by_having_order_by_is_still_allowed():
+    """Verify aggregates with grouping clauses continue to pass."""
+    result = validate_query(
+        "SELECT category, COUNT(*) FROM products GROUP BY category HAVING COUNT(*) > 5 ORDER BY COUNT(*) DESC"
+    )
+    assert isinstance(result, GuardResult)
+
+
+def test_information_schema_read_is_still_allowed():
+    """Verify information_schema reads continue to pass."""
+    result = validate_query("SELECT TABLE_NAME FROM information_schema.TABLES")
+    assert isinstance(result, GuardResult)
