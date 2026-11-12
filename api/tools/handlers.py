@@ -1,31 +1,12 @@
 from __future__ import annotations
 
-import re
-import time
 from typing import Any
 
 from fastapi import HTTPException
 
 from api.tools.helpers import infer_layer, validate_identifier
-from api.utils.db import fetch_all, fetch_matrix, fetch_one
-
-
-def execute_sql_tool(args: dict[str, Any]) -> dict[str, Any]:
-    query = str(args.get("query", "")).strip()
-    if not re.match(r"^SELECT\s", query, flags=re.IGNORECASE):
-        raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
-
-    start = time.perf_counter()
-    columns, rows = fetch_matrix(query)
-    duration_ms = int((time.perf_counter() - start) * 1000)
-
-    return {
-        "query": query,
-        "columns": columns,
-        "rows": rows,
-        "row_count": len(rows),
-        "duration_ms": duration_ms,
-    }
+from api.tools.sql_tools import execute_sql_tool
+from api.utils.db import fetch_all, fetch_one
 
 
 def get_schema_tool() -> dict[str, Any]:
