@@ -123,7 +123,14 @@ def validate_query(
                 "SQL_FORBIDDEN", f"The function {name.upper()} is not permitted."
             )
 
-    if statement.args.get("locks"):
+    # ``locks`` (FOR UPDATE / LOCK IN SHARE MODE) lives on the ``exp.Select``
+    # node that carries it, not necessarily on the statement root: a UNION's
+    # branches are themselves ``exp.Select`` nodes, and a subquery's inner
+    # SELECT is reachable the same way. Checking only ``statement.args`` would
+    # miss both, so every SELECT in the tree is inspected.
+    if statement.args.get("locks") or any(
+        select_node.args.get("locks") for select_node in statement.find_all(exp.Select)
+    ):
         return GuardRejection(
             "SQL_FORBIDDEN",
             "Locking reads (FOR UPDATE / LOCK IN SHARE MODE) are not permitted.",

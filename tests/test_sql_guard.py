@@ -91,6 +91,39 @@ def test_select_lock_in_share_mode_is_rejected():
     assert _reject("SELECT * FROM cars LOCK IN SHARE MODE").code == "SQL_FORBIDDEN"
 
 
+def test_select_for_update_inside_a_union_branch_is_rejected():
+    assert _reject(
+        "SELECT 1 UNION SELECT * FROM t FOR UPDATE"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_select_lock_in_share_mode_inside_a_union_branch_is_rejected():
+    assert _reject(
+        "SELECT 1 UNION SELECT * FROM t LOCK IN SHARE MODE"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_select_for_update_inside_a_subquery_is_rejected():
+    assert _reject(
+        "SELECT * FROM (SELECT * FROM t FOR UPDATE) x"
+    ).code == "SQL_FORBIDDEN"
+
+
+def test_plain_union_without_locking_is_still_allowed():
+    result = validate_query("SELECT a FROM t UNION SELECT b FROM u")
+    assert isinstance(result, GuardResult)
+
+
+def test_ordinary_select_with_price_filter_is_allowed():
+    result = validate_query("SELECT * FROM cars WHERE price > 100")
+    assert isinstance(result, GuardResult)
+
+
+def test_ordinary_select_with_division_is_allowed():
+    result = validate_query("SELECT a/b/c FROM t")
+    assert isinstance(result, GuardResult)
+
+
 def test_cross_database_reference_is_rejected():
     assert _reject("SELECT * FROM otherdb.cars").code == "SQL_FORBIDDEN"
 
