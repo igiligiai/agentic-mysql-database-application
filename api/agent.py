@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ from api.tools.helpers import (
     _resolve_model,
     _safe_tool_content,
 )
+from api.utils import telemetry
 from api.utils.errors import MAX_CONSECUTIVE_REPAIRS, is_tool_error
 from api.utils.trimmer import trim_messages
 
@@ -68,13 +71,23 @@ class AgenticWorkflow:
     _agent_cache: dict[tuple[str, str], Any] = field(default_factory=dict, init=False, repr=False)
     _langgraph_tools: list[Any] = field(default_factory=list, init=False, repr=False)
     _consecutive_failures: int = field(default=0, init=False, repr=False)
+    _tool_spans: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._langgraph_tools = _build_langgraph_tools(self.run_tool, TOOL_SCHEMA_BY_NAME)
 
     def run_tool(self, tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = args or {}
+        start = time.perf_counter()
         result = dispatch_tool(tool, payload)
+        self._tool_spans.append(
+            {
+                "name": tool,
+                "duration_ms": int((time.perf_counter() - start) * 1000),
+                "ok": not is_tool_error(result),
+                "error_code": result.get("code") if is_tool_error(result) else None,
+            }
+        )
 
         if is_tool_error(result) and result.get("retryable"):
             self._consecutive_failures += 1
@@ -99,6 +112,8 @@ class AgenticWorkflow:
         session_id: str = "default",
     ) -> dict[str, Any]:
         self._consecutive_failures = 0
+        self._tool_spans = []
+        turn_started = time.perf_counter()
         api_key = _resolve_api_key()
         model = _resolve_model()
         agent = _get_langgraph_agent(
@@ -177,6 +192,30 @@ class AgenticWorkflow:
                     if text.strip():
                         reply_text = text
                         break
+
+        input_tokens = 0
+        output_tokens = 0
+        for message in new_messages:
+            usage = getattr(message, "usage_metadata", None)
+            if isinstance(usage, dict):
+                input_tokens += int(usage.get("input_tokens") or 0)
+                output_tokens += int(usage.get("output_tokens") or 0)
+
+        failed_spans = [s for s in self._tool_spans if not s["ok"]]
+        telemetry.record_turn(
+            {
+                "session_id": session_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": int((time.perf_counter() - turn_started) * 1000),
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "est_cost": telemetry.estimate_cost(model, input_tokens, output_tokens),
+                "tool_spans": list(self._tool_spans),
+                "repairs": len(failed_spans),
+                "error_code": failed_spans[-1]["error_code"] if failed_spans else None,
+            }
+        )
 
         return {
             "reply": reply_text or "Agent finished without a text response.",

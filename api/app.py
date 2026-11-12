@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from api.agent import AgenticWorkflow
 from api.utils.config import FRONT_DIR, get_port
 from api.utils.db import fetch_all
+from api.utils import telemetry
 from api.utils.errors import is_tool_error
 from api.utils.trimmer import get_trim_settings, update_trim_settings
 
@@ -114,6 +115,12 @@ async def chat(payload: ChatRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Chat workflow failed: {exc}") from exc
+
+
+@app.get("/metrics")
+async def metrics() -> dict[str, Any]:
+    """Aggregate per-turn telemetry. Shapes and numbers only, no transcripts."""
+    return telemetry.snapshot()
 
 
 class ContextConfigRequest(BaseModel):
