@@ -17,6 +17,7 @@ from api.tools.helpers import (
     _resolve_model,
     _safe_tool_content,
 )
+from api.utils.errors import MAX_CONSECUTIVE_REPAIRS, is_tool_error
 from api.utils.trimmer import trim_messages
 
 SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
@@ -60,6 +61,7 @@ class AgenticWorkflow:
     _checkpointer: InMemorySaver = field(default_factory=InMemorySaver, init=False, repr=False)
     _agent_cache: dict[tuple[str, str], Any] = field(default_factory=dict, init=False, repr=False)
     _langgraph_tools: list[Any] = field(default_factory=list, init=False, repr=False)
+    _consecutive_failures: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._langgraph_tools = _build_langgraph_tools(self.run_tool, TOOL_SCHEMA_BY_NAME)
@@ -67,6 +69,21 @@ class AgenticWorkflow:
     def run_tool(self, tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = args or {}
         result = dispatch_tool(tool, payload)
+
+        if is_tool_error(result) and result.get("retryable"):
+            self._consecutive_failures += 1
+            if self._consecutive_failures > MAX_CONSECUTIVE_REPAIRS:
+                # The loop is not converging. Stop it spending the rest of its
+                # step budget guessing, and hand the problem back to the user.
+                result = dict(result)
+                result["retryable"] = False
+                result["hint"] = (
+                    "Repeated attempts have failed. Stop retrying and ask the user "
+                    "to clarify what they want."
+                )
+        elif not is_tool_error(result):
+            self._consecutive_failures = 0
+
         self.history.append({"tool": tool, "args": payload, "result": result})
         return result
 
@@ -75,6 +92,7 @@ class AgenticWorkflow:
         user_message: str,
         session_id: str = "default",
     ) -> dict[str, Any]:
+        self._consecutive_failures = 0
         api_key = _resolve_api_key()
         model = _resolve_model()
         agent = _get_langgraph_agent(
