@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from api.semantics.loader import get_semantic_prompt_block
+from api.semantics.loader import get_semantic_prompt_block_with_status
 from api.tools import dispatch_tool
 from api.tools.helpers import (
     _build_langgraph_tools,
@@ -48,16 +48,35 @@ Current database: connected via live schema introspection (bronze/silver/gold la
 # The semantic block is built from a live information_schema introspection,
 # not curated YAML, so it is computed lazily on first use rather than at
 # import time: introspecting eagerly at import would make a database outage
-# break module import instead of just degrading the prompt. Memoised in
-# api.semantics.loader so introspection does not re-run per request.
+# break module import instead of just degrading the prompt.
+#
+# This assembled prompt is memoised here, on top of api.semantics.loader's own
+# memoisation, because this is the only path production reaches the loader
+# through. The loader deliberately never caches a *failed* introspection so a
+# later, successful one is picked up -- but caching this derived prompt
+# unconditionally would silently defeat that: a DB outage on the very first
+# chat turn would freeze "introspection was unavailable" here for the process
+# lifetime. So the fallback case is excluded from this cache too; only a
+# successful block is memoised, exactly as before.
 _system_prompt: str | None = None
 
 
 def _get_system_prompt() -> str:
     global _system_prompt
-    if _system_prompt is None:
-        _system_prompt = f"{BASE_SYSTEM_PROMPT}\n\n{get_semantic_prompt_block()}"
+    if _system_prompt is not None:
+        return _system_prompt
+    block, is_fallback = get_semantic_prompt_block_with_status()
+    prompt = f"{BASE_SYSTEM_PROMPT}\n\n{block}"
+    if is_fallback:
+        return prompt
+    _system_prompt = prompt
     return _system_prompt
+
+
+def _reset_system_prompt_for_tests() -> None:
+    """Test-only helper to clear the memoised prompt between test cases."""
+    global _system_prompt
+    _system_prompt = None
 
 
 TOOLS_FILE_PATH = Path(__file__).resolve().parent / "utils" / "tools.json"

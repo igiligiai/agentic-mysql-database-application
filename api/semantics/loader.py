@@ -138,14 +138,17 @@ def render_schema_inventory(
 _cached_block: str | None = None
 
 
-def get_semantic_prompt_block() -> str:
-    """Build the semantic prompt block once and reuse it on later calls.
+def _build_semantic_prompt_block() -> tuple[str, bool]:
+    """Return ``(block, is_fallback)``, memoising only a successful block.
 
     Introspection is a metadata query, not something to repeat on every turn
     or every tool call, so the result is cached here after first use. A
     *failed* introspection (empty objects list) is deliberately not cached:
     caching it would freeze the "introspection was unavailable" fallback text
-    for the process lifetime even after the database recovers.
+    for the process lifetime even after the database recovers. ``is_fallback``
+    lets callers that build their own derived, memoised value (e.g. the
+    agent's system prompt) apply the same "never cache a failure" rule to
+    their own cache instead of substring-matching the fallback text.
     """
     global _cached_block
     if _cached_block is None:
@@ -153,9 +156,20 @@ def get_semantic_prompt_block() -> str:
         inventory = render_schema_inventory(objects)
         block = f"{STATIC_GUIDANCE}\n\n{inventory}"
         if not objects:
-            return block
+            return block, True
         _cached_block = block
-    return _cached_block
+    return _cached_block, False
+
+
+def get_semantic_prompt_block() -> str:
+    """Build the semantic prompt block once and reuse it on later calls."""
+    block, _ = _build_semantic_prompt_block()
+    return block
+
+
+def get_semantic_prompt_block_with_status() -> tuple[str, bool]:
+    """Like ``get_semantic_prompt_block``, plus whether it is the fallback."""
+    return _build_semantic_prompt_block()
 
 
 def _reset_cache_for_tests() -> None:
