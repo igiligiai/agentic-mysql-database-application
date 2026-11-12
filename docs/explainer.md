@@ -333,6 +333,8 @@ The backend URL is configurable in the sidebar input (default `http://localhost:
 ### Demo Mode
 If `/ping` fails, the frontend activates demo mode — injecting a hardcoded `DEMO_SCHEMA` and `DEMO_LINEAGE` object directly into `state`. All tool calls are intercepted by `executeToolDemo()` which returns canned responses with a 400ms artificial delay. Chat in demo mode is blocked with a message explaining the backend is needed.
 
+> **Note:** `DEMO_SCHEMA`/`DEMO_LINEAGE` (the `cars_bronze`/`cars_silver`/`brands`/`vw_cars_gold`/`vw_price_summary` car-sales warehouse) are offline fixture data for rendering the UI when no backend is reachable — they are not the live database schema. The agent's system prompt instead introspects whatever schema is actually connected at runtime (see `api/semantics/loader.py`).
+
 ---
 
 ## 13. The Full Agentic Workflow — End-to-End Trace

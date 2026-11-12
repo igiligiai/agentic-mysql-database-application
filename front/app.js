@@ -59,6 +59,11 @@ async function connectToBackend() {
 // ═══════════════════════════════════════════════
 // DEMO MODE (when backend not available)
 // ═══════════════════════════════════════════════
+// NOTE: DEMO_SCHEMA and DEMO_LINEAGE below are offline-demo fixture data
+// (a fictional car-sales medallion warehouse), used only to render this UI
+// when no backend is reachable. They are NOT the live database schema.
+// The agent's system prompt instead introspects whatever schema is
+// actually connected at runtime -- see api/semantics/loader.py.
 const DEMO_SCHEMA = [
   { name: 'cars_bronze', type: 'TABLE', layer: 'bronze', columns: [
     { name: 'id', type: 'INT', key: 'PK', nullable: false },
