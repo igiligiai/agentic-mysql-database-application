@@ -1,72 +1,153 @@
+from __future__ import annotations
+
+import api.semantics.loader as loader
 from api.semantics.loader import (
     MAX_RENDER_BYTES,
     SEMANTICS_DIR,
-    load_semantics,
-    render_semantics,
+    get_semantic_prompt_block,
+    introspect_schema,
+    render_schema_inventory,
 )
-from tests.eval.runner import load_cases
 
 
-def test_semantics_load_from_the_package_directory():
-    data = load_semantics()
-    assert data["glossary"], "glossary.yaml must not be empty"
-    assert data["exemplars"], "exemplars.yaml must not be empty"
-
-
-def test_every_glossary_entry_has_a_term_and_a_definition():
-    for entry in load_semantics()["glossary"]:
-        assert entry.get("term"), f"missing term in {entry}"
-        assert entry.get("definition"), f"missing definition in {entry['term']}"
-
-
-def test_every_exemplar_has_a_question_and_a_select():
-    for entry in load_semantics()["exemplars"]:
-        assert entry.get("question"), f"missing question in {entry}"
-        sql = entry.get("sql", "")
-        assert sql.strip().upper().startswith(("SELECT", "WITH")), entry["question"]
-
-
-def test_glossary_terms_are_unique():
-    terms = [e["term"].lower() for e in load_semantics()["glossary"]]
-    assert len(terms) == len(set(terms))
-
-
-def test_render_includes_terms_and_questions():
-    data = load_semantics()
-    rendered = render_semantics(data)
-    assert data["glossary"][0]["term"] in rendered
-    assert data["exemplars"][0]["question"] in rendered
-
-
-def test_render_stays_within_the_prompt_budget():
-    rendered = render_semantics(load_semantics())
-    assert len(rendered.encode("utf-8")) <= MAX_RENDER_BYTES, (
-        "The semantics block has outgrown the prompt budget. Convert the "
-        "glossary into a lookup_term tool instead of enlarging the prompt."
-    )
-
-
-def test_a_malformed_file_raises(tmp_path):
-    (tmp_path / "glossary.yaml").write_text("- definition: no term here\n", encoding="utf-8")
-    (tmp_path / "exemplars.yaml").write_text("[]\n", encoding="utf-8")
-    try:
-        load_semantics(tmp_path)
-    except ValueError:
-        return
-    raise AssertionError("expected ValueError for a glossary entry with no term")
+def _obj(name: str, type_: str = "BASE TABLE") -> dict[str, str]:
+    return {"name": name, "type": "VIEW" if type_ == "VIEW" else "TABLE", "layer": "silver"}
 
 
 def test_semantics_dir_is_inside_the_api_package():
     assert SEMANTICS_DIR.name == "semantics"
 
 
-def test_every_glossary_term_is_covered_by_an_eval_case():
-    """A prompt change is a behaviour change, so every term needs a case."""
-    covered = {
-        str(term).lower()
-        for case in load_cases()
-        for term in (case.get("covers_terms") or [])
-    }
-    terms = {entry["term"].lower() for entry in load_semantics()["glossary"]}
-    missing = terms - covered
-    assert not missing, f"glossary terms with no eval case: {sorted(missing)}"
+def test_render_inventory_lists_objects_grouped_by_kind_and_layer():
+    objects = [
+        {"name": "events_bronze", "type": "TABLE", "layer": "bronze"},
+        {"name": "vehicle_maneuvers", "type": "TABLE", "layer": "silver"},
+        {"name": "v_asset_vehicle_data", "type": "VIEW", "layer": "gold"},
+    ]
+    rendered = render_schema_inventory(objects)
+
+    assert "events_bronze" in rendered
+    assert "vehicle_maneuvers" in rendered
+    assert "v_asset_vehicle_data" in rendered
+    assert "(table)" in rendered
+    assert "(view)" in rendered
+    assert "Bronze" in rendered and "Silver" in rendered and "Gold" in rendered
+    # It must tell the agent that drill-down tools exist for the detail it omits.
+    assert "get_schema" in rendered
+    assert "describe_table" in rendered
+    assert "get_table_lineage" in rendered
+
+
+def test_render_inventory_ordering_is_deterministic_regardless_of_input_order():
+    objects = [_obj(f"table_{i}") for i in reversed(range(20))]
+    shuffled = [objects[i] for i in (3, 0, 10, 2, 19, 7)] + [
+        o for i, o in enumerate(objects) if i not in (3, 0, 10, 2, 19, 7)
+    ]
+
+    first = render_schema_inventory(list(objects))
+    second = render_schema_inventory(list(shuffled))
+    assert first == second
+
+
+def test_render_inventory_empty_when_no_objects_found():
+    rendered = render_schema_inventory([])
+    assert "get_schema" in rendered
+    assert len(rendered.encode("utf-8")) <= MAX_RENDER_BYTES
+
+
+def test_render_inventory_truncates_deterministically_when_over_budget():
+    objects = [_obj(f"a_very_long_table_name_number_{i:04d}") for i in range(500)]
+
+    rendered = render_schema_inventory(objects, max_bytes=512)
+
+    assert len(rendered.encode("utf-8")) <= 512
+    assert "truncated" in rendered.lower()
+    assert "get_schema" in rendered
+
+    # Same input, same budget -> identical output (stable ordering/truncation point).
+    again = render_schema_inventory(objects, max_bytes=512)
+    assert rendered == again
+
+
+def test_prompt_budget_is_4096_bytes():
+    assert MAX_RENDER_BYTES == 4096
+
+
+def test_a_huge_live_inventory_still_fits_the_prompt_budget():
+    """Regression guard: even an 88-object schema must respect MAX_RENDER_BYTES."""
+    objects = [_obj(f"object_{i:03d}") for i in range(200)]
+    rendered = render_schema_inventory(objects)
+    assert len(rendered.encode("utf-8")) <= MAX_RENDER_BYTES
+
+
+def test_introspect_schema_uses_the_pooled_fetch_all(monkeypatch):
+    calls: list[str] = []
+
+    def fake_fetch_all(query, params=None):
+        calls.append(query)
+        return [
+            {"name": "cars_bronze", "type": "BASE TABLE"},
+            {"name": "vw_cars_gold", "type": "VIEW"},
+        ]
+
+    monkeypatch.setattr(loader, "fetch_all", fake_fetch_all)
+
+    objects = introspect_schema()
+
+    assert len(calls) == 1
+    assert "information_schema.TABLES" in calls[0]
+    assert "DATABASE()" in calls[0]
+    names = {o["name"] for o in objects}
+    assert names == {"cars_bronze", "vw_cars_gold"}
+    by_name = {o["name"]: o for o in objects}
+    assert by_name["vw_cars_gold"]["type"] == "VIEW"
+    assert by_name["cars_bronze"]["type"] == "TABLE"
+
+
+def test_introspect_schema_degrades_to_empty_list_when_the_db_raises(monkeypatch):
+    def boom(query, params=None):
+        raise RuntimeError("Can't connect to MySQL server on '10.0.0.5' (111)")
+
+    monkeypatch.setattr(loader, "fetch_all", boom)
+
+    assert introspect_schema() == []
+
+
+def test_semantic_prompt_block_falls_back_gracefully_when_introspection_fails(monkeypatch):
+    loader._reset_cache_for_tests()
+
+    def boom(query, params=None):
+        raise RuntimeError("Access denied for user 'root'@'10.0.0.5'")
+
+    monkeypatch.setattr(loader, "fetch_all", boom)
+
+    block = get_semantic_prompt_block()
+
+    assert "get_schema" in block
+    assert len(block.encode("utf-8")) <= MAX_RENDER_BYTES
+    # Never leak driver text, hosts, or credentials into the prompt.
+    assert "10.0.0.5" not in block
+    assert "root" not in block
+    assert "Access denied" not in block
+
+    loader._reset_cache_for_tests()
+
+
+def test_semantic_prompt_block_memoises_introspection_across_repeated_calls(monkeypatch):
+    loader._reset_cache_for_tests()
+    calls = {"count": 0}
+
+    def fake_fetch_all(query, params=None):
+        calls["count"] += 1
+        return [{"name": "cars_silver", "type": "BASE TABLE"}]
+
+    monkeypatch.setattr(loader, "fetch_all", fake_fetch_all)
+
+    first = get_semantic_prompt_block()
+    second = get_semantic_prompt_block()
+    third = get_semantic_prompt_block()
+
+    assert calls["count"] == 1, "introspection must run once, not per render"
+    assert first == second == third
+
+    loader._reset_cache_for_tests()

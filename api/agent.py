@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from api.semantics.loader import load_semantics, render_semantics
+from api.semantics.loader import get_semantic_prompt_block
 from api.tools import dispatch_tool
 from api.tools.helpers import (
     _build_langgraph_tools,
@@ -24,7 +24,7 @@ from api.utils import telemetry
 from api.utils.errors import MAX_CONSECUTIVE_REPAIRS, is_tool_error
 from api.utils.trimmer import trim_messages
 
-BASE_SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL car database.
+BASE_SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL database.
 You help users query data, explore schema, trace table lineage, and understand their data.
 
 Your capabilities:
@@ -43,12 +43,22 @@ Guidelines:
 - If a query might be slow, warn the user first
 - Be concise but thorough
 
-Current database: Car data warehouse (bronze/silver/gold layers)"""
+Current database: connected via live schema introspection (bronze/silver/gold layers)"""
 
-# The semantic layer is part of the prompt, so changing glossary.yaml or
-# exemplars.yaml is a behaviour change. Every glossary term is covered by an
-# eval case in tests/eval/cases.yaml.
-SYSTEM_PROMPT = f"{BASE_SYSTEM_PROMPT}\n\n{render_semantics(load_semantics())}"
+# The semantic block is built from a live information_schema introspection,
+# not curated YAML, so it is computed lazily on first use rather than at
+# import time: introspecting eagerly at import would make a database outage
+# break module import instead of just degrading the prompt. Memoised in
+# api.semantics.loader so introspection does not re-run per request.
+_system_prompt: str | None = None
+
+
+def _get_system_prompt() -> str:
+    global _system_prompt
+    if _system_prompt is None:
+        _system_prompt = f"{BASE_SYSTEM_PROMPT}\n\n{get_semantic_prompt_block()}"
+    return _system_prompt
+
 
 TOOLS_FILE_PATH = Path(__file__).resolve().parent / "utils" / "tools.json"
 
@@ -122,7 +132,7 @@ class AgenticWorkflow:
             langgraph_tools=self._langgraph_tools,
             api_key=api_key,
             model=model,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=_get_system_prompt(),
         )
         config = {
             "configurable": {
