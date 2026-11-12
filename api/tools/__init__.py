@@ -5,10 +5,11 @@ from .handlers import (
     get_schema_tool,
     get_table_lineage_tool,
 )
-from .sql_tools import execute_sql_tool
+from .sql_tools import execute_sql_tool, explain_query_tool
 
 __all__ = [
     "execute_sql_tool",
+    "explain_query_tool",
     "get_schema_tool",
     "get_table_lineage_tool",
     "describe_table_tool",

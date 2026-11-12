@@ -64,3 +64,55 @@ def test_driver_failure_becomes_a_retryable_tool_error(monkeypatch):
 def test_missing_query_argument_is_a_bad_args_error():
     result = sql_tools.execute_sql_tool({})
     assert result["code"] in {"TOOL_BAD_ARGS", "SQL_SYNTAX"}
+
+
+import json
+
+_PLAN = {
+    "query_block": {
+        "cost_info": {"query_cost": "412.55"},
+        "table": {
+            "table_name": "cars",
+            "access_type": "ALL",
+            "rows_examined_per_scan": 18420,
+        },
+    }
+}
+
+
+def test_explain_query_extracts_cost_and_detects_a_full_scan(monkeypatch):
+    monkeypatch.setattr(
+        sql_tools, "fetch_all", lambda sql: [{"EXPLAIN": json.dumps(_PLAN)}]
+    )
+    result = sql_tools.explain_query_tool({"query": "SELECT * FROM cars"})
+    assert result["estimated_cost"] == 412.55
+    assert result["rows_examined"] == 18420
+    assert result["full_scan"] is True
+
+
+def test_explain_query_reports_no_full_scan_for_an_indexed_plan(monkeypatch):
+    plan = {
+        "query_block": {
+            "cost_info": {"query_cost": "1.20"},
+            "table": {"access_type": "ref", "rows_examined_per_scan": 3},
+        }
+    }
+    monkeypatch.setattr(
+        sql_tools, "fetch_all", lambda sql: [{"EXPLAIN": json.dumps(plan)}]
+    )
+    result = sql_tools.explain_query_tool({"query": "SELECT * FROM cars WHERE id = 1"})
+    assert result["full_scan"] is False
+    assert result["rows_examined"] == 3
+
+
+def test_explain_query_refuses_a_write(monkeypatch):
+    result = sql_tools.explain_query_tool({"query": "DROP TABLE cars"})
+    assert result["code"] == "SQL_FORBIDDEN"
+
+
+def test_dispatch_routes_explain_query(monkeypatch):
+    monkeypatch.setattr(
+        sql_tools, "fetch_all", lambda sql: [{"EXPLAIN": json.dumps(_PLAN)}]
+    )
+    result = dispatch_tool("explain_query", {"query": "SELECT * FROM cars"})
+    assert result["full_scan"] is True

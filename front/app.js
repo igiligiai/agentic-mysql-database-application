@@ -165,6 +165,15 @@ async function executeToolDemo(name, args) {
       row_count: 5, duration_ms: 42
     };
   }
+  if (name === 'explain_query') {
+    return {
+      query: args.query,
+      estimated_cost: 412.55,
+      rows_examined: 18420,
+      full_scan: true,
+      plan: { query_block: { table: { access_type: 'ALL', rows_examined_per_scan: 18420 } } }
+    };
+  }
   if (name === 'check_data_quality') {
     return {
       table: args.table_name,

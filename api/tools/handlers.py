@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from api.tools.helpers import infer_layer, validate_identifier
-from api.tools.sql_tools import execute_sql_tool
+from api.tools.sql_tools import execute_sql_tool, explain_query_tool
 from api.utils.db import fetch_all, fetch_one
 from api.utils.errors import tool_error
 
@@ -257,6 +257,8 @@ def dispatch_tool(tool: str, args: dict[str, Any] | None = None) -> dict[str, An
 
     if tool == "execute_sql":
         return execute_sql_tool(payload)
+    if tool == "explain_query":
+        return explain_query_tool(payload)
     if tool == "get_schema":
         return get_schema_tool()
     if tool == "get_table_lineage":

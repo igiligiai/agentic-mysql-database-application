@@ -23,6 +23,23 @@
   {
     "type": "function",
     "function": {
+      "name": "explain_query",
+      "description": "Estimate the cost of a SELECT query without running it. Returns the optimizer's cost, how many rows would be examined, and whether a full table scan occurs. Use this before running a query you suspect may be slow or scan a large table.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The SELECT query to analyse. It is not executed."
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_schema",
       "description": "Get the full database schema including all tables and columns.",
       "parameters": {

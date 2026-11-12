@@ -104,6 +104,19 @@ def _build_langgraph_tools(
         result = run_tool_fn("execute_sql", {"query": query, "explanation": explanation})
         return json.dumps(result)
 
+    @tool(
+        description=_tool_description(
+            tool_schema_by_name,
+            "explain_query",
+            "Estimate the cost of a SELECT query without running it.",
+        )
+    )
+    def explain_query(query: str) -> str:
+        """Return the optimizer's plan and cost estimate for a SELECT."""
+
+        result = run_tool_fn("explain_query", {"query": query})
+        return json.dumps(result)
+
     @tool(description=_tool_description(tool_schema_by_name, "get_schema", "Get database schema."))
     def get_schema() -> str:
         """Return full database schema."""
@@ -146,6 +159,7 @@ def _build_langgraph_tools(
 
     return [
         execute_sql,
+        explain_query,
         get_schema,
         get_table_lineage,
         describe_table,
