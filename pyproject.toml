@@ -10,7 +10,6 @@ dependencies = [
     "langchain-openai>=0.3.0",
     "langgraph>=0.3.0",
     "mysql-connector-python>=9.0.0",
-    "mysql==0.0.3",
     "openai>=1.76.0",
     "pytest>=8.0",
     "python-dotenv>=1.0.1",
