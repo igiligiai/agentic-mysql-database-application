@@ -111,3 +111,25 @@ def test_filesystem_paths_without_py_suffix_never_leak_into_the_error():
 def test_alternate_password_spelling_never_leaks_into_the_error():
     err = tool_error("SQL_FORBIDDEN", detail="connect failed pwd=Sup3rSecret!")
     assert "Sup3rSecret!" not in err["error"]
+
+
+def test_dns_hostnames_never_leak_into_the_error():
+    err = tool_error(
+        "SQL_SYNTAX", detail="Host 'db-primary.internal.example.com' is not allowed to connect"
+    )
+    assert "db-primary.internal.example.com" not in err["error"]
+
+
+def test_sql_arithmetic_division_survives_redaction():
+    err = tool_error("SQL_SYNTAX", detail="WHERE a/b/c = 1")
+    assert "a/b/c" in err["error"]
+
+
+def test_unknown_column_detail_survives_redaction():
+    err = tool_error("SQL_UNKNOWN_COLUMN", detail="Unknown column 'cars.price' in 'field list'")
+    assert "cars.price" in err["error"]
+
+
+def test_unknown_table_detail_survives_redaction():
+    err = tool_error("SQL_UNKNOWN_TABLE", detail="Table 'cars_db.silver_cars' doesn't exist")
+    assert "cars_db.silver_cars" in err["error"]
