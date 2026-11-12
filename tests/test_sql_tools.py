@@ -1,5 +1,6 @@
 import api.tools.sql_tools as sql_tools
 from api.tools import dispatch_tool
+from api.utils.errors import is_tool_error
 from mysql.connector import Error as MySQLError
 
 
@@ -21,6 +22,13 @@ def test_dispatch_routes_execute_sql_to_sql_tools(monkeypatch):
 
 def test_dispatch_rejects_an_unknown_tool():
     assert "error" in dispatch_tool("no_such_tool", {})
+
+
+def test_dispatch_unknown_tool_returns_a_structured_tool_error():
+    result = dispatch_tool("no_such_tool", {})
+    assert is_tool_error(result)
+    assert result["code"] == "TOOL_BAD_ARGS"
+    assert "no_such_tool" in result["error"]
 
 
 def test_write_attempt_returns_a_forbidden_tool_error(monkeypatch):

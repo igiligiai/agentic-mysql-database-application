@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from api.tools.helpers import infer_layer, validate_identifier
 from api.tools.sql_tools import execute_sql_tool
 from api.utils.db import fetch_all, fetch_one
+from api.utils.errors import tool_error
 
 
 def get_schema_tool() -> dict[str, Any]:
@@ -265,4 +266,4 @@ def dispatch_tool(tool: str, args: dict[str, Any] | None = None) -> dict[str, An
     if tool == "check_data_quality":
         return check_data_quality_tool(payload)
 
-    return {"error": f"Unknown tool: {tool}"}
+    return tool_error("TOOL_BAD_ARGS", detail=f"Unknown tool: {tool}")
