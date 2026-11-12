@@ -86,3 +86,41 @@ def test_select_into_outfile_never_executes():
 
 def test_empty_sql_is_rejected():
     assert _reject("   ").code == "SQL_SYNTAX"
+
+
+def test_missing_limit_is_injected():
+    result = validate_query("SELECT make FROM cars", max_rows=1000)
+    assert isinstance(result, GuardResult)
+    assert result.limit_injected is True
+    assert result.limit_clamped is False
+    assert result.sql.endswith("LIMIT 1000")
+
+
+def test_oversized_limit_is_clamped():
+    result = validate_query("SELECT make FROM cars LIMIT 5000", max_rows=1000)
+    assert isinstance(result, GuardResult)
+    assert result.limit_clamped is True
+    assert result.limit_injected is False
+    assert result.sql.endswith("LIMIT 1000")
+
+
+def test_small_limit_is_left_alone():
+    result = validate_query("SELECT make FROM cars LIMIT 10", max_rows=1000)
+    assert isinstance(result, GuardResult)
+    assert result.limit_injected is False
+    assert result.limit_clamped is False
+    assert result.sql.endswith("LIMIT 10")
+
+
+def test_limit_is_injected_on_a_union():
+    result = validate_query("SELECT a FROM t UNION SELECT b FROM u", max_rows=50)
+    assert isinstance(result, GuardResult)
+    assert result.limit_injected is True
+    assert result.sql.endswith("LIMIT 50")
+
+
+def test_limit_is_injected_on_a_cte_query():
+    result = validate_query("WITH x AS (SELECT 1 AS n) SELECT n FROM x", max_rows=25)
+    assert isinstance(result, GuardResult)
+    assert result.limit_injected is True
+    assert result.sql.endswith("LIMIT 25")

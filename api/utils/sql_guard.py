@@ -137,5 +137,19 @@ def validate_query(
 
 
 def _apply_limit(statement: exp.Expression, max_rows: int) -> GuardResult:
-    # Placeholder until Task 2; returns the query untouched.
+    """Guarantee the query cannot return more than ``max_rows`` rows.
+
+    ``Expression.limit()`` replaces any existing LIMIT, so it is only called
+    when the query has none or has one that is too large.
+    """
+    current = _existing_limit(statement)
+
+    if current is None:
+        limited = statement.limit(max_rows)
+        return GuardResult(sql=limited.sql(dialect=DIALECT), limit_injected=True)
+
+    if current > max_rows:
+        limited = statement.limit(max_rows)
+        return GuardResult(sql=limited.sql(dialect=DIALECT), limit_clamped=True)
+
     return GuardResult(sql=statement.sql(dialect=DIALECT))
