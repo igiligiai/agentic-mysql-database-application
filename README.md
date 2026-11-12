@@ -79,8 +79,9 @@ frontend sidebar.
 
 - **AST-validated, read-only SQL:** `execute_sql` and `explain_query` are parsed with sqlglot
 	(`api/utils/sql_guard.py`) before anything runs. Multi-statement input, any DML/DDL node
-	anywhere in the tree, `SELECT ... INTO`, `SLEEP`/`BENCHMARK`/`LOAD_FILE`-style functions, and
-	out-of-scope schema qualifiers are all rejected; a missing or oversized `LIMIT` is injected
+	anywhere in the tree, `SELECT ... INTO`, `SLEEP`/`BENCHMARK`/`LOAD_FILE`-style functions
+	(matched regardless of backtick-quoting), locking reads (`FOR UPDATE` / `LOCK IN SHARE MODE`),
+	and out-of-scope schema qualifiers are all rejected; a missing or oversized `LIMIT` is injected
 	or clamped rather than left to the caller. The LLM cannot mutate data.
 - **Structured, redacted tool errors:** failures come back as a typed `ToolError` dict
 	(`api/utils/errors.py` is the single source of truth for the error-code table) instead of a

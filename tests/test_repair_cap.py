@@ -1,5 +1,5 @@
 import api.agent as agent_module
-from api.agent import AgenticWorkflow
+from api.agent import AgenticWorkflow, _retryable_failed_spans
 from api.utils.errors import tool_error
 
 
@@ -56,3 +56,20 @@ def test_non_retryable_errors_do_not_increment_the_counter(monkeypatch):
 
     assert result["code"] == "SQL_FORBIDDEN"
     assert workflow._consecutive_failures == 0
+
+
+def test_repair_count_excludes_non_retryable_spans():
+    spans = [
+        {"name": "execute_sql", "ok": False, "error_code": "SQL_SYNTAX"},
+        {"name": "execute_sql", "ok": False, "error_code": "SQL_FORBIDDEN"},
+        {"name": "get_schema", "ok": True, "error_code": None},
+    ]
+    assert [s["error_code"] for s in _retryable_failed_spans(spans)] == ["SQL_SYNTAX"]
+
+
+def test_repair_count_is_zero_when_only_forbidden_spans_failed():
+    spans = [
+        {"name": "execute_sql", "ok": False, "error_code": "SQL_FORBIDDEN"},
+        {"name": "execute_sql", "ok": False, "error_code": "SQL_FORBIDDEN"},
+    ]
+    assert _retryable_failed_spans(spans) == []

@@ -112,7 +112,8 @@ applied in `api/utils/db.py`.
 input_tokens, output_tokens, est_cost, tool_spans, repairs, error_code}` per turn — message
 content is excluded by construction (only allow-listed keys are ever stored). `GET /metrics`
 exposes an aggregated snapshot: turn count, p50/p95 latency, tool/error counts, token totals,
-estimated cost, and repair rate.
+estimated cost, and repair rate (retryable tool-span failures only — `SQL_FORBIDDEN` and other
+non-retryable rejections are never repaired, so they are excluded from the count).
 
 ### 3.8 Evaluation harness — **done.** `tests/eval/`
 A schema-agnostic YAML corpus of `{question, expected_tools, assertion}`-style cases

@@ -21,7 +21,7 @@ from api.tools.helpers import (
     _safe_tool_content,
 )
 from api.utils import telemetry
-from api.utils.errors import MAX_CONSECUTIVE_REPAIRS, is_tool_error
+from api.utils.errors import MAX_CONSECUTIVE_REPAIRS, RETRYABLE_CODES, is_tool_error
 from api.utils.trimmer import trim_messages
 
 BASE_SYSTEM_PROMPT = """You are AutoBase, an expert data intelligence agent connected to a MySQL database.
@@ -69,6 +69,16 @@ TOOL_SCHEMA_BY_NAME = {
     for item in TOOL_SCHEMAS
     if isinstance(item, dict) and isinstance(item.get("function"), dict)
 }
+
+
+def _retryable_failed_spans(tool_spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Spans counted as "repairs" for telemetry.
+
+    Non-retryable rejections (e.g. SQL_FORBIDDEN) are excluded: they are never
+    repaired, by definition, so counting them would overstate
+    ``telemetry.snapshot()["repair_rate"]``.
+    """
+    return [s for s in tool_spans if not s["ok"] and s["error_code"] in RETRYABLE_CODES]
 
 
 @dataclass
@@ -211,7 +221,10 @@ class AgenticWorkflow:
                 input_tokens += int(usage.get("input_tokens") or 0)
                 output_tokens += int(usage.get("output_tokens") or 0)
 
-        failed_spans = [s for s in self._tool_spans if not s["ok"]]
+        # Only count spans whose error is actually retryable: non-retryable
+        # rejections (e.g. SQL_FORBIDDEN) are never repaired, by definition,
+        # so including them would overstate telemetry.snapshot()["repair_rate"].
+        failed_spans = _retryable_failed_spans(self._tool_spans)
         telemetry.record_turn(
             {
                 "session_id": session_id,
