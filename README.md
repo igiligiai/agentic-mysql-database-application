@@ -38,7 +38,7 @@ entirely — no token cost for plain data browsing.
 
 | Layer | Module | Responsibility |
 | --- | --- | --- |
-| Entrypoint | `main.py` | Starts uvicorn on `PORT` (default 8000) |
+| Entrypoint | `main.py` | Starts uvicorn on `PORT` (default 8080) |
 | HTTP | `api/app.py` | Routes, CORS, static mount of `front/` |
 | Orchestration | `api/agent.py` | `AgenticWorkflow`: agent cache, checkpointer, tool history |
 | Tools | `api/tools/handlers.py`, `api/tools/sql_tools.py` | Metadata tools and SQL-executing tools respectively, both routed through `dispatch_tool()` |
@@ -140,7 +140,7 @@ Set these in your shell or environment file:
 - DB_PASSWORD (default: empty)
 - DB_NAME (default: cars_db)
 - DB_PORT (default: 3306)
-- PORT (default: 8000)
+- PORT (default: 8080)
 - OPENAI_API_KEY (required)
 - OPENAI_MODEL (required)
 - QUERY_MAX_ROWS (default: 1000) — hard ceiling the SQL guard enforces by rewriting/clamping `LIMIT`
@@ -172,13 +172,13 @@ python main.py
 
 3. Open the app
 
-- http://localhost:8000/
+- http://localhost:8080/
 
 ## Notes
 
 - See `docs/explainer.md` for a full end-to-end walkthrough, including a request trace and a LangChain/LangGraph deep dive.
 - Legacy files autobase_server.js and car_data_agent.html are preserved as migration references.
-- Frontend defaults to backend URL http://localhost:8000.
+- Frontend defaults to backend URL http://localhost:8080.
 
 ## Testing
 

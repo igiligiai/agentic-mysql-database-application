@@ -36,7 +36,7 @@ agentic-mysql-database-application/
 
 ## 3. Startup Path
 
-`main.py` reads the `PORT` env var (default `8000`) and calls:
+`main.py` reads the `PORT` env var (default `8080`) and calls:
 ```python
 uvicorn.run("api.app:app", host="0.0.0.0", port=port, reload=True)
 ```
@@ -289,7 +289,7 @@ The frontend is a **single-page application** — pure HTML, CSS, and vanilla Ja
 **All backend communication** goes through one function:
 ```javascript
 async function callBackend(endpoint, body = {}) {
-  const url = state.backendUrl + endpoint;  // e.g., "http://localhost:8000/chat"
+  const url = state.backendUrl + endpoint;  // e.g., "http://localhost:8080/chat"
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -299,7 +299,7 @@ async function callBackend(endpoint, body = {}) {
 }
 ```
 
-The backend URL is configurable in the sidebar input (default `http://localhost:8000`). **No API keys are ever sent from the frontend.** OpenAI authentication is handled entirely server-side via environment variables.
+The backend URL is configurable in the sidebar input (default `http://localhost:8080`). **No API keys are ever sent from the frontend.** OpenAI authentication is handled entirely server-side via environment variables.
 
 ### Connection flow
 1. User clicks "Connect" → `connectToBackend()` calls `POST /ping`.

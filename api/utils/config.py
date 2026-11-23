@@ -19,7 +19,7 @@ DB_CONFIG = {
 }
 
 
-def get_port(default: int = 8000) -> int:
+def get_port(default: int = 8080) -> int:
     return int(os.getenv("PORT", str(default)))
 
 

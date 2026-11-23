@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════
 const state = {
   connected: false,
-  backendUrl: 'http://localhost:8000',
+  backendUrl: 'http://localhost:8080',
   sessionId: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `session-${Date.now()}`,
   schema: [],
   tableList: [],
@@ -700,7 +700,7 @@ pip install -e .
 python main.py
 \`\`\`
 
-The API starts on http://localhost:8000 and serves:
+The API starts on http://localhost:8080 and serves:
 
 - POST /ping
 - POST /tool

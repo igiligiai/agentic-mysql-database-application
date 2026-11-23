@@ -82,7 +82,7 @@ All configuration is read from environment variables (or a `.env` file loaded by
 | `DB_PASSWORD`               | _(empty)_   | no       |
 | `DB_NAME`                   | `cars_db`   | no       |
 | `DB_PORT`                   | `3306`      | no       |
-| `PORT`                      | `8000`      | no       |
+| `PORT`                      | `8080`      | no       |
 | `CTX_MAX_MESSAGES`          | `40`        | no       |
 | `CTX_MAX_TOOL_RESULT_CHARS` | `4000`      | no       |
 | `CTX_KEEP_LAST_N_PAIRS`     | `10`        | no       |
@@ -510,7 +510,7 @@ export DB_PASSWORD=...
 
 # 3. Start the server
 python main.py
-# → http://localhost:8000
+# → http://localhost:8080
 ```
 
 `reload=True` is active in development (set in `main.py`). The server hot-reloads on Python file changes.
